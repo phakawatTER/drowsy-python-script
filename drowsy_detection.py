@@ -16,17 +16,8 @@ from getpass import getpass
 import json
 import geocoder
 import socket
-
-# START SERVER 
-print("WAITING FOR CLIENT")
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.bind((socket.gethostname(), 8009)) # open port 8009 for connection
-s.listen(1) # ALLOW ONE USER AT A TIME
-clientsocket, address = s.accept() 
-print("CLIENT CONNECTED")
-
-
-# OPENCV STUFFS
+import struct
+import pickle
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
 ap.add_argument("-p",
@@ -37,20 +28,38 @@ ap.add_argument("-p",
 # ap.add_argument("-pw", "--password", required=True, help="Your password")
 args = vars(ap.parse_args())
 
+# START SERVER
+print("WAITING FOR CLIENT")
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.bind(("192.168.1.46", 8009))  # open port 8009 for connection
+# s.bind(("192.168.2.1", 8009))  # directly host the raspberry pi
+# s.bind(("192.168.16.27",8009))
+s.listen(1)  # ALLOW ONE USER AT A TIME
+clientsocket, address = s.accept()
+print("CLIENT CONNECTED")
+print("WATING FOR AUTHENTICATION")
+uid = clientsocket.recv(4096) # WAITING FOR CLIENT TO AUTHENTICATE
+uid = uid.decode("utf-8")
+print(uid)
+print("Ready to operate")
+
+
 mixer.init()
 mixer.set_num_channels(1)
-# Mock current latlng
-latlng = geocoder.ip("me")
-
+latitude = 0
+longitude = 0
 #  PUSH NOTIFICATION TO FIREBASE
 def pushNotification():
-    global userInfo
-    uid = userInfo["uid"]
-    data = {"user_id": uid, "latlng": latlng.latlng}
+    global uid
+    data = {
+        "user_id": uid,
+        "latlng": [latitude,longitude]
+    }
     print(API_PUSH_NOTIFICATION)
     req = requests.post(url=API_PUSH_NOTIFICATION, data=data, timeout=1)
     # print out http request response
     print(req.text)
+
 
 def playAlert():
     busy = mixer.music.get_busy()
@@ -61,10 +70,12 @@ def playAlert():
         req_process = Thread(target=pushNotification)
         req_process.start()
 
+
 def stopAlert():
     # wait 1 second to stop
     time.sleep(1)
     mixer.music.stop()
+
 
 def eye_aspect_ratio(eye):
     # compute the euclidean distances between the two sets of
@@ -80,25 +91,12 @@ def eye_aspect_ratio(eye):
     # return the eye aspect ratio
     return ear
 
-def authenticate(username, password):
-    data = {"username": username, "password": password, "from": "camera"}
-    # print(data)
-    req = requests.post(url=API_LOGIN, data=data)
-    return json.loads(req.text)
 
-userInfo = None
-while userInfo == None:
-    username = input("Enter your username: ")
-    password = getpass("Enter your password: ")
-    response = authenticate(username, password)
-    code = response["code"]
-    message = response["message"]
-    if code == 200:
-        userInfo = response["userInfo"]
-        print(message)
-        break
-    else:
-        print(message)
+# def authenticate(username, password):
+#     data = {"username": username, "password": password, "from": "camera"}
+#     # print(data)
+#     req = requests.post(url=API_LOGIN, data=data)
+#     return json.loads(req.text)
 
 # define two constants, one for the eye aspect ratio to indicate
 # blink and then a second constant for the number of consecutive
@@ -131,26 +129,37 @@ face_cascade = cv2.CascadeClassifier(
 startTime = time.time()
 total_frame = 0
 WIDTH = 320
-HEIGHT = 200
+HEIGHT = 240
+data = b""
+payload_size = struct.calcsize(">Ldd")
 while True:
-
-   
     try:
-         # READ DATABYTE FROM RASPBERRY PI
-        frame_byte = clientsocket.recv(102400)
-        # print(frame_byte)
-        inp = np.asarray(bytearray(frame_byte),dtype=np.uint8)
-        frame = cv2.imdecode(inp,cv2.IMREAD_COLOR)
-        # cv2.imshow("frame",frame)
-        # continue
-        # cv2.imshow("frame", frame)
-  
-
-        # frame = cv2.resize(frame, (WIDTH, HEIGHT), interpolation=cv2.INTER_AREA)
+        # READ DATABYTE FROM RASPBERRY PI
+        # Reconstruct image from recieved byte
+        while len(data) < payload_size:
+            data += clientsocket.recv(4096)
+            # print("data")
+        packed_msg_size = data[:payload_size]
+        data = data[payload_size:]
+        unpacked_data = struct.unpack(">Ldd", packed_msg_size)
+        msg_size = unpacked_data[0]
+        latitude = unpacked_data[1]
+        longitude = unpacked_data[2]
+        while len(data) < msg_size:
+            data += clientsocket.recv(4096)
+        frame_data = data[:msg_size]
+        data = data[msg_size:]
+        # inp = np.asarray(bytearray(frame_data), dtype=np.uint8)
+        frame = pickle.loads(frame_data, fix_imports=True, encoding="bytes")
+        frame = cv2.imdecode(frame, cv2.IMREAD_COLOR)
+        # READ FRAME FROM CAMERA
+        # ret,frame = cap.read()
+        frame = cv2.resize(frame, (WIDTH, HEIGHT),
+                           interpolation=cv2.INTER_AREA)  # RESIZE IMAGE
+        # CONVERT INTO GREYSCALE IMAGE
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         # detect faces in the grayscale frame
         rects = detector(gray, 0)
-        # faces = face_cascade.detectMultiScale(gray, 2, 5)
 
         # loop over the face detections
         for rect in rects:
@@ -216,7 +225,9 @@ while True:
                         (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 2)
             cv2.putText(frame, "EAR THRESHOLD: {:.2f}".format(EYE_AR_THRESH),
                         (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 2)
-       
+            cv2.putText(frame, "Latitude:{:.3f} Longitude:{:.3f}".format(
+                latitude, longitude), (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 2)
+
         cv2.imshow("frame", frame)
         # END FOR LOOP
         key = cv2.waitKey(1) & 0xFF
@@ -228,20 +239,9 @@ while True:
         if key == 27:
             break
 
-    except  Exception as err:
+    except Exception as err:
         print(err)
-        continue
-    # key = cv2.waitKey(1) & 0xFF
-    # if (key == ord("w")):
-    #     EYE_AR_THRESH += 0.01
-    # if (key == ord("s")):
-    #     EYE_AR_THRESH -= 0.01
-    # # if the `q` key was pressed, break from the loop
-    # if key == 27:
-    #     break
+        pass
 
-# # do a bit of cleanup
-cv2.destroyAllWindows()
-cv2.destroyAllWindows() # destroy all windows
-s.close() # close connection
-# # vs.stop()
+cv2.destroyAllWindows()  # destroy all windows
+s.close()  # close connection
