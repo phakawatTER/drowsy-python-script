@@ -24,16 +24,11 @@ ap.add_argument("-p",
                 "--shape-predictor",
                 required=True,
                 help="path to facial landmark predictor")
-# ap.add_argument("-u", "--username", required=True, help="Your username")
-# ap.add_argument("-pw", "--password", required=True, help="Your password")
 args = vars(ap.parse_args())
-
 # START SERVER
 print("WAITING FOR CLIENT")
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.bind(("192.168.1.46", 8009))  # open port 8009 for connection
-# s.bind(("192.168.2.1", 8009))  # directly host the raspberry pi
-# s.bind(("192.168.16.27",8009))
 s.listen(1)  # ALLOW ONE USER AT A TIME
 clientsocket, address = s.accept()
 print("CLIENT CONNECTED")
@@ -41,7 +36,7 @@ print("WATING FOR AUTHENTICATION")
 uid = clientsocket.recv(4096) # WAITING FOR CLIENT TO AUTHENTICATE
 uid = uid.decode("utf-8")
 print(uid)
-print("Ready to operate")
+print("READY TO OPERATE")
 
 
 mixer.init()
@@ -52,6 +47,7 @@ longitude = 0
 def pushNotification():
     global uid
     data = {
+        "event":"Drowsy",
         "user_id": uid,
         "latlng": [latitude,longitude]
     }
@@ -91,17 +87,10 @@ def eye_aspect_ratio(eye):
     # return the eye aspect ratio
     return ear
 
-
-# def authenticate(username, password):
-#     data = {"username": username, "password": password, "from": "camera"}
-#     # print(data)
-#     req = requests.post(url=API_LOGIN, data=data)
-#     return json.loads(req.text)
-
 # define two constants, one for the eye aspect ratio to indicate
 # blink and then a second constant for the number of consecutive
 # frames the eye must be below the threshold
-EYE_AR_THRESH = 0.25
+EYE_AR_THRESH = 0.3
 EYE_AR_CONSEC_FRAMES = 3
 
 # initialize the frame counters and the total number of blinks
@@ -122,12 +111,12 @@ predictor = dlib.shape_predictor(args["shape_predictor"])
 (rStart, rEnd) = face_utils.FACIAL_LANDMARKS_IDXS["right_eye"]
 # start the video stream thread
 print("[INFO] starting video stream thread...")
-face_cascade = cv2.CascadeClassifier(
-    "cascades/haarcascade_frontalface_default.xml")
-# cap = cv2.VideoCapture(0)
-# loop over frames from the video stream
-startTime = time.time()
-total_frame = 0
+# face_cascade = cv2.CascadeClassifier(
+#     "cascades/haarcascade_frontalface_default.xml")
+
+START_TIME = time.time()
+TOTAL_FRAME = 10
+AVG_FRAME = 10
 WIDTH = 320
 HEIGHT = 240
 data = b""
@@ -191,7 +180,7 @@ while True:
             if ear < EYE_AR_THRESH:
                 COUNTER += 1
                 # print("EYES ARE CLOSED {}".format(COUNTER))
-                EYES_CLOSED_TIME = COUNTER / 30
+                EYES_CLOSED_TIME = COUNTER / AVG_FRAME
 
             # otherwise, the eye aspect ratio is not below the blink
             # threshold
@@ -223,10 +212,10 @@ while True:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 2)
             cv2.putText(frame, "EYES CLOSED: {:.2f} S".format(EYES_CLOSED_TIME),
                         (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 2)
-            cv2.putText(frame, "EAR THRESHOLD: {:.2f}".format(EYE_AR_THRESH),
-                        (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 2)
-            cv2.putText(frame, "Latitude:{:.3f} Longitude:{:.3f}".format(
-                latitude, longitude), (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 2)
+        cv2.putText(frame, "EAR THRESHOLD: {:.2f}".format(EYE_AR_THRESH),
+                    (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 2)
+        cv2.putText(frame, "Latitude:{:.3f} Longitude:{:.3f}".format(
+            latitude, longitude), (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 2)
 
         cv2.imshow("frame", frame)
         # END FOR LOOP
@@ -238,6 +227,12 @@ while True:
         # if the `q` key was pressed, break from the loop
         if key == 27:
             break
+        
+        CURRENT_TIME = time.time()
+        TIME_DIFF = int(CURRENT_TIME - START_TIME)
+        TOTAL_FRAME = TOTAL_FRAME + 1
+        AVG_FRAME = TOTAL_FRAME / TIME_DIFF
+        # print(TOTAL_FRAME / TIME_DIFF)
 
     except Exception as err:
         print(err)
