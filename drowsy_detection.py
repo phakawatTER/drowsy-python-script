@@ -7,70 +7,148 @@ import imutils
 import time
 import dlib
 import cv2
-import requests
 import math
 from threading import Thread
-from pygame import mixer
-from links import API_PUSH_NOTIFICATION, API_LOGIN
+from multiprocessing import Process, Manager
 from getpass import getpass
-import json
-import geocoder
+import connect as conn
+import readserial
+import sys
 import socket
-import struct
 import pickle
+import struct
+import mappicosocket as ms
+import serversocket as ss
+import hashlib
+import base64
+
+test = hashlib.sha512(b"asdasf").hexdigest()
+SECRET = ".YSWORD-DROWSY"
+manager = Manager()
+trip_data = manager.dict()
+TRACKER_ID = "TLO12017000971"  # TER'S TRACKER
+
+
+#mappico = ms.MappicoSocket(TRACKER_ID,trip_data)
+
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
-ap.add_argument("-p",
-                "--shape-predictor",
-                required=True,
-                help="path to facial landmark predictor")
+ap.add_argument("-s", "--stream", required=False, help="ENABLE STREAMING")
+ap.add_argument("-t", "--test", required=False, help="ENABLE TEST MODE")
+ap.add_argument("-r", "--request", required=False, help="ENABLE HTTP REQUEST")
 args = vars(ap.parse_args())
-# START SERVER
-print("WAITING FOR CLIENT")
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.bind(("192.168.1.46", 8009))  # open port 8009 for connection
-s.listen(1)  # ALLOW ONE USER AT A TIME
-clientsocket, address = s.accept()
-print("CLIENT CONNECTED")
-print("WATING FOR AUTHENTICATION")
-uid = clientsocket.recv(4096) # WAITING FOR CLIENT TO AUTHENTICATE
-uid = uid.decode("utf-8")
-print(uid)
-print("READY TO OPERATE")
+REQUEST_BOOL = args["request"]
+TEST_BOOL = args["test"]
+STREAM_BOOL = args["stream"]
+
+if int(REQUEST_BOOL):
+    try:
+        print("http request enabled")
+        connect = conn.Connect()
+        rs = readserial.ReadSerial()
+    except:
+        pass
 
 
-mixer.init()
-mixer.set_num_channels(1)
-latitude = 0
-longitude = 0
-#  PUSH NOTIFICATION TO FIREBASE
-def pushNotification():
-    global uid
-    data = {
-        "event":"Drowsy",
-        "user_id": uid,
-        "latlng": [latitude,longitude]
-    }
-    print(API_PUSH_NOTIFICATION)
-    req = requests.post(url=API_PUSH_NOTIFICATION, data=data, timeout=1)
-    # print out http request response
-    print(req.text)
+if TEST_BOOL:
+    TRACKER_ID = "60000003"
+    print(f"track id {TRACKER_ID}")
+STREAM = 0
+if STREAM_BOOL:
+    STREAM = int(STREAM_BOOL)
+
+if STREAM:
+    END_POINT = input("END_POINT ADDRESS: ")
+    END_POINT_PORT = int(input("END_POINT PORT: "))
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.connect((END_POINT, END_POINT_PORT))
+    print("SUCCESSFULLY CONNECTED TO ENDPOINT DEVICE")
 
 
-def playAlert():
-    busy = mixer.music.get_busy()
-    if not busy:
-        # numberOfChannel = mixer.get_num_channels()
-        mixer.music.load('./alarm_sounds/alarm.mp3')
-        mixer.music.play()
-        req_process = Thread(target=pushNotification)
-        req_process.start()
+SHAPE_PREDICTOR = "shape_predictor_68_face_landmarks.dat"
+IS_AUTH = False
+CO = 0
+LPG = 0
+SMOKE = 0
+LATLNG = (0, 0)
+DIRECTION = 0
+SPEED = 0
+PROGRAM_FINISHED = False
+while not IS_AUTH:
+    try:
+        email = "test"
+        password = "1234"
+        IS_AUTH = connect.authenticate(email, hashlib.sha512(
+            bytes(f"{password}{SECRET}", encoding="utf-8")).hexdigest())
+        # IS_AUTH = connect.authenticate("phakawat.ter@gmail.com","123456789")
+        if IS_AUTH:
+            break
+    except Exception as err:
+        print(err)
+        print("TRYING TO AUTHENTICATE....")
+ACCTIME = connect.acctime  # ACCTIME
+UID = connect.uid  # USER ID
+server_socket = ss.ServerSokcet(uid=UID)
+print(f"UID:{UID},ACCTIME:{ACCTIME}")
+
+# START NEW PROCESS TO CONNECT WITH MAPPICO SOCKET...
+mappico_socket_proc = Process(target=ms.MappicoSocket, args=(
+    TRACKER_ID, trip_data, connect, UID, ACCTIME))
+mappico_socket_proc.start()  # START SOCKET
 
 
-def stopAlert():
-    # wait 1 second to stop
-    time.sleep(1)
-    mixer.music.stop()
+def updateGasData():
+    global LPG, CO, SMOKE
+    REQ_TIME = time.time()
+    while not PROGRAM_FINISHED:
+        try:
+            GAS_DATA = rs.readGas()
+            CURRENT_TIME = time.time()
+            if float(GAS_DATA[0]) >= 0:
+                LPG = float(GAS_DATA[0])
+            if float(GAS_DATA[1]) >= 0:
+                CO = float(GAS_DATA[1])
+            if float(GAS_DATA[2]) >= 0:
+                SMOKE = float(GAS_DATA[2])
+            if CO >= 70:
+                TIME_DIFF = int(CURRENT_TIME - REQ_TIME)
+                if int(TIME_DIFF) >= 5:
+                    REQ_TIME = time.time()  # UPDATE REQTIME
+                    proc = Process(target=connect.pushnotification, args=(
+                        "Over CO", LATLNG, DIRECTION, SPEED))
+                    proc.start()
+                    proc.join()
+        except Exception as err:
+            pass
+
+
+def updateCoordinate():
+    global ACCTIME, CO, LPG, SMOKE, LATLNG
+    while not PROGRAM_FINISHED:
+        try:
+            # print("OBD_UPDATED",trip_data)
+            lat = trip_data["lat"]
+            lon = trip_data["lon"]
+            speed = trip_data["speed"]
+            direction = trip_data["direction"]
+            LATLNG = (lat, lon)
+            DIRECTION = direction
+            SPEED = speed
+            wait_time = 2
+            start_time = time.time()
+            proc = Process(target=connect.updateTripData,
+                           args=(CO, LATLNG, speed, direction))
+            proc.start()
+            proc.join()
+            stop_time = time.time()
+            if wait_time - (stop_time-start_time) > 0:
+                time.sleep(wait_time - (stop_time-start_time) )
+            print(stop_time - start_time)
+            # connect.updateTripData(CO,LATLNG,speed,direction)
+            # time.sleep(1.5)
+        except Exception as err:
+            # print(err)
+            pass
 
 
 def eye_aspect_ratio(eye):
@@ -87,10 +165,11 @@ def eye_aspect_ratio(eye):
     # return the eye aspect ratio
     return ear
 
+
 # define two constants, one for the eye aspect ratio to indicate
 # blink and then a second constant for the number of consecutive
 # frames the eye must be below the threshold
-EYE_AR_THRESH = 0.3
+EYE_AR_THRESH = 0.275
 EYE_AR_CONSEC_FRAMES = 3
 
 # initialize the frame counters and the total number of blinks
@@ -103,7 +182,7 @@ NEXT_SECOND = 0
 # the facial landmark predictor
 print("[INFO] loading facial landmark predictor...")
 detector = dlib.get_frontal_face_detector()
-predictor = dlib.shape_predictor(args["shape_predictor"])
+predictor = dlib.shape_predictor(SHAPE_PREDICTOR)
 
 # grab the indexes of the facial landmarks for the left and
 # right eye, respectively
@@ -111,40 +190,35 @@ predictor = dlib.shape_predictor(args["shape_predictor"])
 (rStart, rEnd) = face_utils.FACIAL_LANDMARKS_IDXS["right_eye"]
 # start the video stream thread
 print("[INFO] starting video stream thread...")
-# face_cascade = cv2.CascadeClassifier(
-#     "cascades/haarcascade_frontalface_default.xml")
+
+
+# UPDATE GAS AND GPS IF REQUEST BOOL IS SET
+if REQUEST_BOOL or REQUEST_BOOL == None:
+    # # CREATE AND START THREADS FOR UPDATING INFO IN BACKGROUND
+    # print("START UPDATE_GAS THREAD...")
+    # GAS_THREAD = Thread(target=updateGasData)
+    # GAS_THREAD.start()
+    print("START UPDATE_GPS THREAD...")
+    COOR_THREAD = Thread(target=updateCoordinate)
+    COOR_THREAD.start()
+
 
 START_TIME = time.time()
 TOTAL_FRAME = 10
 AVG_FRAME = 10
-WIDTH = 320
-HEIGHT = 240
-data = b""
-payload_size = struct.calcsize(">Ldd")
+WIDTH = 240
+HEIGHT = 160
+# USE HUAWEI IP CAM
+#cap = cv2.VideoCapture("rtsp://admin:HuaWei123@192.168.2.3/LiveMedia/ch1/Media2")
+# USE WEBCAM
+cap = cv2.VideoCapture(0)
 while True:
     try:
-        # READ DATABYTE FROM RASPBERRY PI
-        # Reconstruct image from recieved byte
-        while len(data) < payload_size:
-            data += clientsocket.recv(4096)
-            # print("data")
-        packed_msg_size = data[:payload_size]
-        data = data[payload_size:]
-        unpacked_data = struct.unpack(">Ldd", packed_msg_size)
-        msg_size = unpacked_data[0]
-        latitude = unpacked_data[1]
-        longitude = unpacked_data[2]
-        while len(data) < msg_size:
-            data += clientsocket.recv(4096)
-        frame_data = data[:msg_size]
-        data = data[msg_size:]
-        # inp = np.asarray(bytearray(frame_data), dtype=np.uint8)
-        frame = pickle.loads(frame_data, fix_imports=True, encoding="bytes")
-        frame = cv2.imdecode(frame, cv2.IMREAD_COLOR)
-        # READ FRAME FROM CAMERA
-        # ret,frame = cap.read()
+        ret, frame = cap.read()
+        original_frame = frame
         frame = cv2.resize(frame, (WIDTH, HEIGHT),
                            interpolation=cv2.INTER_AREA)  # RESIZE IMAGE
+
         # CONVERT INTO GREYSCALE IMAGE
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         # detect faces in the grayscale frame
@@ -190,53 +264,63 @@ while True:
                 if COUNTER >= EYE_AR_CONSEC_FRAMES:
                     TOTAL += 1
 
-                busy = mixer.music.get_busy()
-                # stop alert if mixer is playing
-                # start new thread to stop mixer
-                if busy:
-                    stopMixer = Thread(target=stopAlert)
-                    # stopMixer.start()
                 # reset the eye frame counter
                 COUNTER = 0
                 EYES_CLOSED_TIME = 0
                 NEXT_SECOND = 0
-        # ALARM EVERY 1 SECOND SINCE EYES ARE CLOSED
-            if (math.floor(EYES_CLOSED_TIME) % 1 == 0 and EYES_CLOSED_TIME >= 1):
+
+        # ALARM EVERY 2 SECOND SINCE EYES ARE CLOSED
+            if (math.floor(EYES_CLOSED_TIME) % 2 == 0 and EYES_CLOSED_TIME >= 2):
                 if (NEXT_SECOND < EYES_CLOSED_TIME):
                     NEXT_SECOND = math.floor(EYES_CLOSED_TIME) + 1
-                    req_process = Thread(target=pushNotification)
-                    req_process.start()
-                    # playAlert()
+                    alarm_proc = Process(target=connect.pushnotification, args=(
+                        "Drowsy", LATLNG, DIRECTION, SPEED))
+                    alarm_proc.start()  # START ALARMIMG PROCESS
             # Draw text
             cv2.putText(frame, "Eyes Aspect Ratio: {:.2f}".format(ear), (300, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.2, (0, 255, 0), 1)
             cv2.putText(frame, "EYES CLOSED: {:.2f} S".format(EYES_CLOSED_TIME),
-                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 2)
+                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.2, (0, 255, 0), 1)
         cv2.putText(frame, "EAR THRESHOLD: {:.2f}".format(EYE_AR_THRESH),
-                    (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 2)
+                    (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.2, (0, 255, 0), 1)
         cv2.putText(frame, "Latitude:{:.3f} Longitude:{:.3f}".format(
-            latitude, longitude), (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 2)
+            LATLNG[0], LATLNG[1]), (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.2, (0, 255, 0), 1)
+        cv2.putText(frame, "CO:{} LPG:{} SMOKE:{}".format(
+            CO, LPG, SMOKE), (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.2, (0, 255, 0), 1)
+        # frame = cv2.resize(frame, (480, 210), interpolation=cv2.INTER_AREA)
+        result, image = cv2.imencode(".jpg", frame)
 
-        cv2.imshow("frame", frame)
-        # END FOR LOOP
-        key = cv2.waitKey(1) & 0xFF
-        if (key == ord("w")):
-            EYE_AR_THRESH += 0.01
-        if (key == ord("s")):
-            EYE_AR_THRESH -= 0.01
-        # if the `q` key was pressed, break from the loop
+        # STREAM IMAGE THROUGH LAN
+        if STREAM:
+            try:
+                data = pickle.dumps(image, 0)
+                size = len(data)
+                print(f"IMAGE SIZE OF {size} BYTES")
+                s.sendall(struct.pack(">L", size)+data)
+            except Exception as err:
+                break
+        try:
+            img_as_text = base64.b64encode(image)
+            server_socket.sendImage(img_as_text)
+        except:
+            pass
+
+        # cv2.imshow("FRAME",frame)
+        key = cv2.waitKey(1) & 0xff
         if key == 27:
             break
-        
         CURRENT_TIME = time.time()
         TIME_DIFF = int(CURRENT_TIME - START_TIME)
         TOTAL_FRAME = TOTAL_FRAME + 1
         AVG_FRAME = TOTAL_FRAME / TIME_DIFF
-        # print(TOTAL_FRAME / TIME_DIFF)
 
     except Exception as err:
         print(err)
         pass
 
+mappico_socket_proc.terminate()  # TERMINATING SOCKET PROCESS
+cap.release()
 cv2.destroyAllWindows()  # destroy all windows
-s.close()  # close connection
+PROGRAM_FINISHED = True
+sys.exit(0)
+# s.close()  # close connection
