@@ -21,6 +21,7 @@ class Connect:
         self.token = None
         self.uid = None
         self.acctime = None
+        self.expoPushToken = None
         pass
 
     def authenticate(self, username, password):
@@ -32,6 +33,7 @@ class Connect:
         if (response["code"] == 200):
             self.userInfo = response["userInfo"]
             self.token = self.userInfo["token"]
+            self.expoPushToken = self.userInfo["expoPushToken"]
             self.uid = self.userInfo["uid"]
             self.generateACC()
             return True
@@ -40,28 +42,34 @@ class Connect:
             return False
 
     def generateACC(self):
-        payload = {"uid": self.uid}
+        payload = {"uid": self.uid, "token": self.expoPushToken}
         req = requests.post(url=API_CREATE_TRIP, data=payload)
         print(req.text)
         response = json.loads(req.text)
         self.acctime = response["acctime"]
         return print(f"YOUR ACCTIME IS {self.acctime}")
 
-    def pushnotification(self, event, latlng, direction, speed, uid=None, acctime=None):
-        if acctime == None or uid == None:
-            payload = {
-                "event": event,
-                "user_id": self. uid,
-                "latlng": latlng,
-                "acctime": self.acctime,
-                "direction": direction,
-                "speed": speed
-            }
-        else:
-            payload = {"event": event, "user_id": uid, "latlng": latlng,
-                       "acctime": acctime, "direction": direction, "speed": speed}
-        req = requests.post(url=API_PUSH_NOTIFICATION, data=payload)
-        return print(req.text)
+    def pushnotification(self, event, latlng, direction, speed, uid=None, acctime=None, pushToken=None):
+        if uid == None:
+            uid = self.uid
+        if acctime == None:
+            acctime = self.acctime
+        if pushToken == None:
+            pushToken = self.expoPushToken
+        payload = {
+            "event": event,
+            "user_id": uid,
+            "latlng": latlng,
+            "acctime": acctime,
+            "direction": direction,
+            "speed": speed,
+            "token": pushToken
+        }
+        try:
+            req = requests.post(url=API_PUSH_NOTIFICATION, data=payload)
+            print(req.text)
+        except Exception as err:
+            print(err)
 
     def updateTripData(self, co, latlng, speed, direction):
         payload = {"acctime": self.acctime, "latlng": latlng, "co": co,
@@ -69,7 +77,6 @@ class Connect:
         try:
             req = requests.post(url=API_UPDATE_TRIPDATA,
                                 data=payload, timeout=1)
-            # print(req.text)
         except Exception as err:
             print(err)
             # pass

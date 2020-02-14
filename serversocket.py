@@ -4,12 +4,12 @@ import json
 import cv2
 import base64
 import re
+from camera_api import SOCKET_ENDPOINT
 
 
 class ServerSokcet(socketio.Client):
     def __init__(self, uid="897192"):
         socketio.Client.__init__(self)
-
         self.uid = uid
         self.sent_data = ''
         @self.event
@@ -25,10 +25,15 @@ class ServerSokcet(socketio.Client):
         def disconnect():
             print("disconnected from ter's server...")
 
-        self.connect("http://68.183.178.189:4050")
+        self.connect(SOCKET_ENDPOINT)
 
-    def sendImage(self, jpg_txt):
-        self.emit("send_image", {
-            "uid": self.uid,
-            "jpg_txt": jpg_txt
-        })
+    def sendImage(self, **kwargs):
+        sent_data = {"uid": self.uid}
+        for key, value in kwargs.items():
+            sent_data[key] = value
+        self.emit("send_image", sent_data)
+
+
+if __name__ == "__main__":
+    socket = ServerSokcet()
+    socket.sendImage(jpg_text="test",coor="test",eiei="989")
