@@ -17,12 +17,11 @@ from camera_api import \
 
 
 class Connect:
-    def __init__(self):
-        self.token = None
-        self.uid = None
-        self.acctime = None
-        self.expoPushToken = None
-        pass
+    def __init__(self, token=None, uid=None, acctime=None, expoPushToken=None):
+        self.token = token
+        self.uid = uid
+        self.acctime = acctime
+        self.expoPushToken = expoPushToken
 
     def authenticate(self, username, password):
         payload = {"username": username,
@@ -42,7 +41,8 @@ class Connect:
             return False
 
     def generateACC(self):
-        payload = {"uid": self.uid, "token": self.expoPushToken}
+        payload = {"uid": self.uid,
+                   "pushToken": self.expoPushToken, "token": self.token}
         req = requests.post(url=API_CREATE_TRIP, data=payload)
         print(req.text)
         response = json.loads(req.text)

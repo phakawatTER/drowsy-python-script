@@ -51,7 +51,7 @@ trip_data = manager.dict()
 TRACKER_ID = "TLO12017000971"  # TER'S TRACKER
 if TEST_BOOL:
     TRACKER_ID = "60000003"
-print(f"TRACKER ID: {TRACKER_ID}")
+print("TRACKER ID: {}".format(TRACKER_ID))
 SHAPE_PREDICTOR = "shape_predictor_68_face_landmarks.dat"
 IS_AUTH = False
 CO = 0
@@ -68,7 +68,7 @@ while not IS_AUTH:
         email = args["username"]
         password = args["password"]
         IS_AUTH = connect.authenticate(email, hashlib.sha512(
-            bytes(f"{password}{SECRET}", encoding="utf-8")).hexdigest())
+            bytes("{}{}".format(password,SECRET), encoding="utf-8")).hexdigest())
         if IS_AUTH:
             break
         else:
@@ -84,7 +84,7 @@ server_socket = ss.ServerSokcet(uid=UID)
 mappico_socket = Process(target=ms.MappicoSocket, args=(
     TRACKER_ID, trip_data, connect, UID, ACCTIME, PUSH_TOKEN))
 mappico_socket.start()
-print(f"UID:{UID},ACCTIME:{ACCTIME}")
+print("UID:{},ACCTIME:{}".format(UID,ACCTIME))
 
 
 def pushnotification(event, coords, direction, speed):
@@ -207,7 +207,7 @@ WIDTH = 240
 HEIGHT = 140
 # USE HUAWEI IP CAM
 cap = cv2.VideoCapture(
-    "rtsp://admin:HuaWei123@192.168.2.3/LiveMedia/ch1/Media2")
+    "rtsp://admin:HuaWei123@192.168.1.35/LiveMedia/ch1/Media1")
 # USE WEBCAM
 # cap = cv2.VideoCapture(0)
 print("[INFO] starting video stream thread...")
@@ -280,17 +280,6 @@ while True:
                     alarm_thread = Thread(target=pushnotification, args=(
                         "Drowsy", LATLNG, DIRECTION, SPEED))
                     alarm_thread.start()  # START ALARMIMG PROCESS
-        # # Draw text
-        # cv2.putText(frame, "Eyes Aspect Ratio: {:.2f}".format(ear), (300, 30),
-        #             cv2.FONT_HERSHEY_SIMPLEX, 0.2, (0, 255, 0), 1)
-        # cv2.putText(frame, "EYES CLOSED: {:.2f} S".format(EYES_CLOSED_TIME),
-        #             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.2, (0, 255, 0), 1)
-        # cv2.putText(frame, "EAR THRESHOLD: {:.2f}".format(EYE_AR_THRESH),
-        #             (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.2, (0, 255, 0), 1)
-        # cv2.putText(frame, "Latitude:{:.3f} Longitude:{:.3f}".format(
-        #     LATLNG[0], LATLNG[1]), (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.2, (0, 255, 0), 1)
-        # cv2.putText(frame, "CO:{} LPG:{} SMOKE:{}".format(
-        #     CO, LPG, SMOKE), (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.2, (0, 255, 0), 1)
 
         # Update current time and calculate fps and avg. fps.
         CURRENT_TIME = time.time()
@@ -300,8 +289,8 @@ while True:
         if PREV_TIME == TIME_DIFF:
             FPS += 1
         else:
-            print(
-                f"Average FPS:{round(AVG_FRAME,2)} , TOTAL TIME :{TIME_DIFF} second(s) , FPS:{FPS}")
+            # print(
+            #     "Average FPS:{round(AVG_FRAME,2)} , TOTAL TIME :{TIME_DIFF} second(s) , FPS:{FPS}")
             FPS = 0
         PREV_TIME = TIME_DIFF
 
