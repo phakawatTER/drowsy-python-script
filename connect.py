@@ -42,7 +42,8 @@ class Connect:
             return False
 
     def generateACC(self):
-        payload = {"uid": self.uid, "token": self.expoPushToken}
+        payload = {"uid": self.uid,
+                   "pushToken": self.expoPushToken, "token": self.token}
         req = requests.post(url=API_CREATE_TRIP, data=payload)
         print(req.text)
         response = json.loads(req.text)
@@ -71,11 +72,11 @@ class Connect:
         except Exception as err:
             print(err)
 
-    def updateTripData(self, co, latlng, speed, direction):
+    def updateTripData(self, co, latlng, speed, direction, url=API_UPDATE_TRIPDATA):
         payload = {"acctime": self.acctime, "latlng": latlng, "co": co,
                    "uid": self.uid, "speed": speed, "direction": direction}
         try:
-            req = requests.post(url=API_UPDATE_TRIPDATA,
+            req = requests.post(url=url,
                                 data=payload, timeout=1)
         except Exception as err:
             print(err)

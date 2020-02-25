@@ -138,6 +138,9 @@ def updateCoordinate():
             # to make sure that the the value is updated every 2 seconds
             if wait_time - (stop_time-start_time) > 0:
                 time.sleep(wait_time - (stop_time-start_time))
+            # print(
+            #     f"coords:({lat},{lon})\nspeed:{speed}\ndirection:{direction}")
+            # print("___________________________________________________________")
         except Exception as err:
             print(err)
             time.sleep(wait_time)
@@ -206,18 +209,23 @@ FPS = 0
 WIDTH = 240
 HEIGHT = 140
 # USE HUAWEI IP CAM
-cap = cv2.VideoCapture(
-    "rtsp://admin:HuaWei123@192.168.2.3/LiveMedia/ch1/Media2")
+# cap = cv2.VideoCapture(
+    # "rtsp://admin:HuaWei123@192.168.1.38/LiveMedia/ch1/Media2")
 # USE WEBCAM
-# cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(0)
 print("[INFO] starting video stream thread...")
+
 while True:
     try:
         ret, frame = cap.read()
         # CONVERT INTO GREYSCALE IMAGE
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         # detect faces in the grayscale frame
+        start = time.time()
         faces = detector(gray, 0)
+        stop = time.time()
+        print("spent {} for face detection".format(round(stop-start, 2)))
+        start = time.time()
         for index, face in enumerate(faces, start=0):
             if index > 0:
                 break
@@ -291,7 +299,9 @@ while True:
         #     LATLNG[0], LATLNG[1]), (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.2, (0, 255, 0), 1)
         # cv2.putText(frame, "CO:{} LPG:{} SMOKE:{}".format(
         #     CO, LPG, SMOKE), (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.2, (0, 255, 0), 1)
-
+        stop = time.time()
+        print("spent {} for face".format(round(stop-start, 2)))
+        
         # Update current time and calculate fps and avg. fps.
         CURRENT_TIME = time.time()
         TIME_DIFF = int(CURRENT_TIME - START_TIME)

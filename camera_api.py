@@ -1,5 +1,13 @@
-ENDPOINT = "http://68.183.178.189:4000"
-SOCKET_ENDPOINT = "http://68.183.178.189:4050"
+# # DigitalOcean Endpoint
+ENDPOINT = "http://35.247.173.11:4000"
+SOCKET_ENDPOINT = "http://35.247.173.11:4000"
+## Ter Endpoint (Global)
+# ENDPOINT = "http://58.9.194.7:4000"
+# SOCKET_ENDPOINT = "http://58.9.194.7:4000"
+## Ter Endpoint (Local)
+# ENDPOINT = "http://192.168.1.44:4000"
+# SOCKET_ENDPOINT = "http://192.168.1.44:4000"
+## Local Endpoint
 # ENDPOINT = "http://localhost:4000"
 # SOCKET_ENDPOINT = "http://localhost:4050"
 API_UPDATE_LOCATION = ENDPOINT + "api/v1/update/location"
