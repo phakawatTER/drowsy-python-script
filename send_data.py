@@ -161,12 +161,7 @@ FPS = 0
 # WIDTH = 240
 # HEIGHT = 140
 # USE HUAWEI IP CAM
-if args["cam"]:
-    cap = cv2.VideoCapture(
-        "rtsp://admin:HuaWei123@192.168.1.38/LiveMedia/ch1/Media2")
-# USE WEBCAM
-else:
-    cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(args["cam"])
 
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1920)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1080)

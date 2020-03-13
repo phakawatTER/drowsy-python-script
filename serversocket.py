@@ -8,7 +8,7 @@ from camera_api import SOCKET_ENDPOINT
 
 
 class ServerSokcet(socketio.Client):
-    def __init__(self, uid="897192"):
+    def __init__(self, uid=None):
         socketio.Client.__init__(self)
         self.uid = uid
         self.sent_data = ''
