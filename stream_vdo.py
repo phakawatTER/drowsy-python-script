@@ -169,8 +169,8 @@ if args["cam"]:
 else:
     cap = cv2.VideoCapture(0)
 
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1280)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 720)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1920)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1080)
 print("[INFO] starting video stream thread...")
 resize_factor = 0.8
 while True:
@@ -178,8 +178,8 @@ while True:
 
         ret, frame = cap.read()
         HEIGHT, WIDTH, _ = frame.shape
-        ## set quality of image
-        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]
+        # set quality of image
+        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 55]
         result, image = cv2.imencode(".jpg", frame, encode_param)
         img_as_text = base64.b64encode(image)
         # cv2.imshow("frame",frame)
