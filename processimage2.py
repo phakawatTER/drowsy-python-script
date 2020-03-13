@@ -100,7 +100,7 @@ class ProcessImage(socketio.Client):
         if not os.path.exists(os.path.join(current_directory, "trip_vdo", self.uid)):
             os.makedirs(os.path.join(current_directory, "trip_vdo", self.uid))
         self.vdo_writer = cv2.VideoWriter(os.path.join(current_directory, "trip_vdo", self.uid, "{}.avi".format(
-            acctime)), cv2.VideoWriter_fourcc(*'DIVX'), 15, (720, 480))
+            acctime)), cv2.VideoWriter_fourcc(*'DIVX'), 10, (1280, 720))
         # try to use recognizer if driver face has been learned before
         # if it fails just pass
         try:
@@ -161,8 +161,8 @@ class ProcessImage(socketio.Client):
         print("Program finished...")
         self.disconnect()
         cv2.destroyAllWindows()
-        #if not self.face_known:
-         #   train_face_recognizer.train_face_model(self.uid)
+        # if not self.face_known:
+        #   train_face_recognizer.train_face_model(self.uid)
         self.vdo_writer.release()
         os._exit(0)
         # sys.exit(0)
@@ -253,7 +253,7 @@ class ProcessImage(socketio.Client):
                 # self.draw_face(
                 #     shape, frame, rect=((x1-offset_x, y1-offest_y), (x2+offset_x, y2+offest_y)), draw_landmarks_point=True)
                 self.draw_face(
-                    shape, frame, draw_landmarks_point=False)
+                    shape, frame, draw_landmarks_point=True)
 
         # cv2.imshow("DNN {}".format(self.uid), frame)
         return (face_found, frame)
@@ -436,9 +436,9 @@ class ProcessImage(socketio.Client):
                 # update previous time
                 self.PREV_TIME = int(CURRENT_TIME-self.START_TIME)
                 frame = frame_dnn
-                frame = cv2.resize(frame,(360,252),interpolation=cv2.INTER_AREA)
+                # frame = cv2.resize(frame,(2560,1440),interpolation=cv2.INTER_AREA)
                 self.vdo_writer.write(frame)
-                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 60]
+                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 35]
                 _, image = cv2.imencode(".jpg", frame, encode_param)
                 img_as_text = base64.b64encode(image)
                 self.trip_data["jpg_text"] = img_as_text.decode("utf-8")
@@ -446,6 +446,7 @@ class ProcessImage(socketio.Client):
                 # self.tersocket.emit("send_image", self.trip_data)
                 # self.emit("live_stream", self.trip_data)
                 # stdout data to nodejs server
+                cv2.imshow("frame", frame)
                 print(str(json.dumps(self.trip_data))+"__END__")
                 key = cv2.waitKey(1) & 0xff
                 if key == 27:
@@ -474,3 +475,12 @@ if __name__ == "__main__":
     process_image = ProcessImage()
     process_image.run()
 
+
+'''
+TODO LIST
+- CNN facial landmark prediction model
+- YOLO v3 for face detection and localization
+- Train a model to take sequence of frame as input 
+to predict drowsiness pattern from vdo 
+
+'''
