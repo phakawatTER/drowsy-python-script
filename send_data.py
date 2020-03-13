@@ -24,8 +24,8 @@ import base64
 
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
-ap.add_argument("-t", "--test", required=False, help="ENABLE TEST MODE")
-ap.add_argument("-r", "--serial", required=False, help="ENABLE READING SERIAL")
+ap.add_argument("-t", "--test",default=False,type=bool, required=False, help="ENABLE TEST MODE")
+ap.add_argument("-r", "--serial", required=False,default=False,type=bool, help="ENABLE READING SERIAL")
 ap.add_argument("-u", "--username", required=True,
                 help="Please enter your username ")
 ap.add_argument("-p", "--password", required=True,
@@ -35,9 +35,7 @@ ap.add_argument("-c", "--cam", required=False, default=0,
 
 args = vars(ap.parse_args())
 TEST_BOOL = args["test"]
-READING_SERIAL = False
-if args["serial"]:
-    READING_SERIAL = int(args["serial"])
+READING_SERIAL = (args["serial"])
 
 
 connect = conn.Connect()
@@ -62,6 +60,7 @@ LATLNG = (0, 0)
 DIRECTION = 0
 SPEED = 0
 PROGRAM_FINISHED = False
+print("Authenticate to server ...")
 while not IS_AUTH:
     try:
         # email = input("Enter email: ")
