@@ -12,12 +12,12 @@ import time
 import connect as conn
 import argparse
 import threading
+from middlesocket import MiddleServerSocket
 import sys
 import multiprocessing as mp
 import mappicosocket as ms
 import connect as conn
 import schedule
-# import ddestimator as dde
 import base64
 from threading import Thread
 import train_face_recognizer
@@ -53,7 +53,7 @@ class ProcessImage(socketio.Client):
     TEST_VIDEO_PATH = os.path.join(
         current_directory, "test_vdo.mp4")
 
-    def __init__(self, ip="http://localhost:4000", target_ip="xxx.xxx.xxx.xxx",tracker_id="", uid="", acctime="", token="", pushtoken="" ,test=False):
+    def __init__(self, ip="http://localhost:4000",tracker_id="", uid="", acctime="", token="", pushtoken="" ,test=False):
         socketio.Client.__init__(self)
         self.TEST_MODE = test 
         self.face_check = False
@@ -136,17 +136,18 @@ class ProcessImage(socketio.Client):
             print("Disconnected from server...")
 
         self.connect(ip)
+        self.middle_server_socket = MiddleServerSocket()
 
     def load_landmark_model(self,path):
-        with tf.device("/cpu:0"):
-            self.landmark_model = load_model(path)
+        #with tf.device("/gpu:0"):
+        self.landmark_model = load_model(path)
     
     def predict_face_landmark(self,face,show_exec_time=False):
         start = time.time()
         me = np.array(face)/255
         x_test = np.expand_dims(me, axis=0)
         x_test = np.expand_dims(x_test, axis=3)
-        with tf.device('/cpu:0'):  # use gpu for prediction
+        with tf.device('/gpu:0'):  # use gpu for prediction
             y_test = self.landmark_model.predict(x_test)
         label_points = (np.squeeze(y_test))
         stop = time.time()
@@ -173,53 +174,6 @@ class ProcessImage(socketio.Client):
         os._exit(0)
         # sys.exit(0)
 
-    # def draw_face(self, shape, frame, rect=None, draw_landmarks_point=False):
-    #     points = self.ddestimator.dlib_shape_to_points(shape)
-    #     euler, rotation, translation = self.ddestimator.est_head_dir(
-    #         points)
-    #     _, _, gaze_D = self.ddestimator.est_gaze_dir(points)
-    #     bc_2d_coords = self.ddestimator.proj_head_bounding_cube_coords(
-    #         rotation, translation)
-    #     gl_2d_coords = self.ddestimator.proj_gaze_line_coords(
-    #         rotation, translation, gaze_D)
-    #     self.ddestimator.draw_gaze_line(
-    #         frame, gl_2d_coords, (0, 255, 0), gaze_D)
-    #     frame = self.ddestimator.draw_bounding_cube(
-    #         frame, bc_2d_coords, (255, 0, 0), euler)
-    #     # Draw box on face
-    #     shape = face_utils.shape_to_np(shape)
-    #     # extract the left and right eye coordinates, then use the
-    #     # coordinates to compute the eye aspect ratio for both eyes
-    #     leftEye = shape[lStart:lEnd]
-    #     rightEye = shape[rStart:rEnd]
-    #     mouth = shape[mStart:mEnd]
-    #     inner_mouth = shape[innmStart:innmEnd]
-    #     leftEAR = self.eye_aspect_ratio(leftEye)
-    #     rightEAR = self.eye_aspect_ratio(rightEye)
-    #     # average the eye aspect ratio together for both eyes
-    #     self.ear = (leftEAR + rightEAR) / 2.0
-    #     # compute the convex hull for the left and right eye, then
-    #     # visualize each of the eyes
-    #     leftEyeHull = cv2.convexHull(leftEye)
-    #     rightEyeHull = cv2.convexHull(rightEye)
-    #     mouthHull = cv2.convexHull(mouth)
-    #     innerMouthHull = cv2.convexHull(inner_mouth)
-    #     cv2.drawContours(
-    #         frame, [leftEyeHull], -1, (0, 255, 0), 1)
-    #     cv2.drawContours(
-    #         frame, [rightEyeHull], -1, (0, 255, 0), 1)
-    #     cv2.drawContours(
-    #         frame, [mouthHull], -1, (0, 255, 0), 1)
-    #     cv2.drawContours(
-    #         frame, [innerMouthHull], -1, (0, 255, 0), 1)
-    #     if rect:
-    #         left, top = rect[0]
-    #         right, bottom = rect[1]
-    #         cv2.rectangle(frame, (left, top),
-    #                       (right, bottom), (0, 255, 0), 2)
-    #     if draw_landmarks_point:
-    #         for (x, y) in points:
-    #             cv2.circle(frame, (x, y), 1, (0, 255, 0), 1)
 
     def draw_face(self,frame,face_shape,origin,key_points, draw_index=False, draw_point=True, draw_contour=False):
         x_points = key_points[::2]
@@ -292,6 +246,7 @@ class ProcessImage(socketio.Client):
                 face = cv2.resize(original_face,(INPUT_SHAPE,INPUT_SHAPE),interpolation=cv2.INTER_AREA) # resize image 
                 grey_face = cv2.cvtColor(face,cv2.COLOR_BGR2GRAY) 
                 key_points = self.predict_face_landmark(grey_face,show_exec_time=True)
+ #               print(key_points)
                 frame = self.draw_face(frame,(int(x2-x1),int(y2-y1)),(x1,y1),key_points)
                 # self.draw_face(
                 #     shape, frame, draw_landmarks_point=True)
@@ -394,11 +349,10 @@ class ProcessImage(socketio.Client):
                 _, image = cv2.imencode(".jpg", frame, encode_param)
                 img_as_text = base64.b64encode(image)
                 self.trip_data["ear"] = self.AVG_EAR
-                print(self.trip_data)
-                # self.trip_data["jpg_text"] = img_as_text.decode("utf-8")
-                cv2.imshow("frame", frame)
+                self.trip_data["jpg_text"] = img_as_text.decode("utf-8")
+                #cv2.imshow("frame", frame)
                 if not self.TEST_MODE:
-                    print(str(json.dumps(self.trip_data))+"__END__")
+                    self.middle_server_socket.emit("livestream",self.trip_data)
                 key = cv2.waitKey(1) & 0xff
                 if key == 27:
                     break

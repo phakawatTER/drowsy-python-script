@@ -1,5 +1,6 @@
 ENDPOINT = "http://68.183.178.189:4000"
 SOCKET_ENDPOINT = "http://68.183.178.189:4050"
+MIDDLE_SERVER_SOCKET_ENDPOINT = "http://178.128.92.31:4000"
 # ENDPOINT = "http://localhost:4000"
 # SOCKET_ENDPOINT = "http://localhost:4050"
 API_UPDATE_LOCATION = ENDPOINT + "api/v1/update/location"
