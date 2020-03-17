@@ -76,7 +76,7 @@ while not IS_AUTH:
 
     except Exception as err:
         print(err)
-        print("failed to authenticate to server....")
+        #print("failed to authenticate to server....")
 ACCTIME = connect.acctime  # ACCTIME
 UID = connect.uid  # USER ID
 PUSH_TOKEN = connect.expoPushToken
