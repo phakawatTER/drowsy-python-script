@@ -5,6 +5,7 @@ import base64
 import numpy as np
 from scipy.spatial import distance as dist
 from tensorflow.keras.models import load_model
+from tensorflow.keras.backend import set_session
 import tensorflow as tf
 import math
 import connect
@@ -28,6 +29,20 @@ from camera_api import ENDPOINT
 import json
 current_directory = os.path.dirname(__file__)
 print(current_directory)
+
+
+
+
+
+
+
+sess = tf.Session()
+set_session(sess)
+
+
+
+
+
 # 60000003
 
 # # grab the indexes of the facial landmarks for the left and
@@ -37,7 +52,6 @@ print(current_directory)
 (innmStart, innmEnd) = face_utils.FACIAL_LANDMARKS_IDXS["inner_mouth"]
 EYE_AR_THRESH = 0.27
 EYE_AR_CONSEC_FRAMES = 3
-
 INPUT_SHAPE = 256
 
 class ProcessImage(socketio.Client):
@@ -147,7 +161,7 @@ class ProcessImage(socketio.Client):
         me = np.array(face)/255
         x_test = np.expand_dims(me, axis=0)
         x_test = np.expand_dims(x_test, axis=3)
-        with tf.device('/gpu:0'):  # use gpu for prediction
+        with tf.device('/device:GPU:0'):  # use gpu for prediction
             y_test = self.landmark_model.predict(x_test)
         label_points = (np.squeeze(y_test))
         stop = time.time()
@@ -227,7 +241,8 @@ class ProcessImage(socketio.Client):
         blob = cv2.dnn.blobFromImage(frame, 1.0, (300, 300), [
             104, 117, 123], False, False)
         self.net.setInput(blob)
-        faces = self.net.forward()
+        with tf.device("/device:GPU:0"):
+            faces = self.net.forward()
         HEIGHT, WIDTH, _ = frame.shape
         gray_dnn = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         face_found = False
@@ -307,8 +322,8 @@ class ProcessImage(socketio.Client):
     def run(self):
         self.net = cv2.dnn.readNetFromTensorflow(
             ProcessImage.DNN_MODEL_FILE, ProcessImage.DNN_MODEL_CONFIG)
-        # self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
-        # self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
+        self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
+        self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
         training_set_directory = os.path.join(
             current_directory, "training_set", self.uid)
         try:
