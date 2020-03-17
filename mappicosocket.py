@@ -9,8 +9,6 @@ class MappicoSocket:
         self.acctime = acctime
         self.TRACKER_ID = TRACKER_ID
         self.sio = socketio.Client()
-        self.sio.connect("https://iwapp.mappico.co.th")
-        self.sio.emit("room", "MAPPICO")
         print(f"TRACKER ID :{TRACKER_ID}")
         print(f"trip_data :{trip_data}")
         print(f"uid :{uid}")
@@ -42,6 +40,9 @@ class MappicoSocket:
         @self.sio.event
         def disconnect():
             print("mappico's socket disconnected...")
+
+        self.sio.connect("https://iwapp.mappico.co.th")
+        self.sio.emit("room", "MAPPICO")
         self.sio.wait()
 
 

@@ -27,20 +27,22 @@ class Connect:
     def authenticate(self, username, password):
         payload = {"username": username,
                    "password": password, "from": "camera"}
-        req = requests.post(url=API_LOGIN, data=payload)
-        response = req.json()
-        # print(response)
-        if (response["code"] == 200):
-            self.userInfo = response["userInfo"]
-            self.token = self.userInfo["token"]
-            self.expoPushToken = self.userInfo["expoPushToken"]
-            self.uid = self.userInfo["uid"]
-            self.generateACC()
-            return True
-        else:
-            print("Failed to connect to server")
-            return False
-
+        try:
+            req = requests.post(url=API_LOGIN, data=payload ,timeout=1.5)
+            response = req.json()
+            # print(response)
+            if (response["code"] == 200):
+                self.userInfo = response["userInfo"]
+                self.token = self.userInfo["token"]
+                self.expoPushToken = self.userInfo["expoPushToken"]
+                self.uid = self.userInfo["uid"]
+                self.generateACC()
+                return True
+            else:
+                print("Failed to connect to server")
+                return False
+        except:
+            print("Request Timeout!!!")
     def generateACC(self):
         payload = {"uid": self.uid,
                    "pushToken": self.expoPushToken, "token": self.token}

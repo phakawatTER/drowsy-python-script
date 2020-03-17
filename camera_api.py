@@ -4,9 +4,9 @@
 ## Ter Endpoint (Global)
 # ENDPOINT = "http://58.9.194.7:4000"
 # SOCKET_ENDPOINT = "http://58.9.194.7:4000"
-## Ter Endpoint (Local)
-ENDPOINT = "http://192.168.1.44:4000"
-SOCKET_ENDPOINT = "http://192.168.1.44:4000"
+## Mappico Endpoint (Local)
+ENDPOINT = "http://172.17.1.56:4000"
+SOCKET_ENDPOINT = "http://172.17.1.56:4000"
 ## Local Endpoint
 # ENDPOINT = "http://localhost:4000"
 # SOCKET_ENDPOINT = "http://localhost:4050"

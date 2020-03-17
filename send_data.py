@@ -163,8 +163,8 @@ FPS = 0
 # USE HUAWEI IP CAM
 cap = cv2.VideoCapture(args["cam"])
 
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1920)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1080)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1280)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 720)
 print("[INFO] starting video stream thread...")
 resize_factor = 0.8
 while True:
