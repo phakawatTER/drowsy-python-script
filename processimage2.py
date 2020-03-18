@@ -87,7 +87,7 @@ class ProcessImage(socketio.Client):
         self.data_is_recv = False
         # create directory if it's not exist
         if not os.path.exists(os.path.join(current_directory, "trip_vdo", self.uid)):
-            os.makedirs(os.path.join(current_directory, "trip_vdo", self.uid))
+            os.makedirs(os.path.join(root_directory, "trip_vdo", self.uid))
         self.vdo_writer = cv2.VideoWriter(os.path.join(root_directory, "trip_vdo", self.uid, "{}.avi".format(
             acctime)), cv2.VideoWriter_fourcc(*'DIVX'), 10, (1280, 720))
         # try to use recognizer if driver face has been learned before
