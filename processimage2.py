@@ -5,7 +5,6 @@ import base64
 import numpy as np
 from scipy.spatial import distance as dist
 from tensorflow.keras.models import load_model
-from tensorflow.keras.backend import set_session
 import tensorflow as tf
 import math
 import connect
@@ -21,28 +20,13 @@ import connect as conn
 import schedule
 import base64
 from threading import Thread
-import train_face_recognizer
 import math
 import os
 import pickle
 from camera_api import ENDPOINT
 import json
 current_directory = os.path.dirname(__file__)
-print(current_directory)
-
-
-
-
-
-
-
-sess = tf.Session()
-set_session(sess)
-
-
-
-
-
+root_directory = "/home/phakawat/"
 # 60000003
 
 # # grab the indexes of the facial landmarks for the left and
@@ -55,9 +39,6 @@ EYE_AR_CONSEC_FRAMES = 3
 INPUT_SHAPE = 256
 
 class ProcessImage(socketio.Client):
-    # SHAPE_PREDICTOR = os.path.join(current_directory, "68_landmarks_v1.00.dat")
-    SHAPE_PREDICTOR = os.path.join(
-        current_directory, "shape_predictor_68_face_landmarks.dat")
     DNN_MODEL_FILE = os.path.join(
         current_directory, "opencv_face_detector_uint8.pb")
     DNN_MODEL_CONFIG = os.path.join(
@@ -66,7 +47,6 @@ class ProcessImage(socketio.Client):
         current_directory, "mmod_human_face_detector.dat")
     TEST_VIDEO_PATH = os.path.join(
         current_directory, "test_vdo.mp4")
-
     def __init__(self, ip="http://localhost:4000",tracker_id="", uid="", acctime="", token="", pushtoken="" ,test=False):
         socketio.Client.__init__(self)
         self.TEST_MODE = test 
@@ -98,12 +78,17 @@ class ProcessImage(socketio.Client):
         # self.ddestimator = dde.ddestimator()
         self.api_connect = conn.Connect(
             token=token, uid=uid, acctime=acctime, expoPushToken=pushtoken)
-        self.trip_data = dict()
+        self.trip_data = {
+            "uid":uid,
+            "ear":0,
+            "coor":(0,0),
+            "gas":{"CO":0,"LPG":0,"SMOKE":0}
+        }
         self.data_is_recv = False
         # create directory if it's not exist
         if not os.path.exists(os.path.join(current_directory, "trip_vdo", self.uid)):
             os.makedirs(os.path.join(current_directory, "trip_vdo", self.uid))
-        self.vdo_writer = cv2.VideoWriter(os.path.join(current_directory, "trip_vdo", self.uid, "{}.avi".format(
+        self.vdo_writer = cv2.VideoWriter(os.path.join(root_directory, "trip_vdo", self.uid, "{}.avi".format(
             acctime)), cv2.VideoWriter_fourcc(*'DIVX'), 10, (1280, 720))
         # try to use recognizer if driver face has been learned before
         # if it fails just pass
@@ -116,10 +101,7 @@ class ProcessImage(socketio.Client):
         except Exception as err:
             print(err)
             pass
-        # # connect to mappico socket
-        self.mpc_socket = ms.MappicoSocket(
-            tracker_id, self.trip_data, connect=self.connect, uid=uid, acctime=acctime, pushToken=pushtoken)
-
+        
         # schedule to check if data is recieved
         # if data is not recieved anymore so proceed to terminate the process
         schedule.every(15).seconds.do(self.checkIfAlive)
@@ -129,9 +111,8 @@ class ProcessImage(socketio.Client):
         def connect():
             print("Connected to server...")
 
-        @self.on("image_{}".format(uid))
+        @self.on("image_{}".format(uid)) # receive image streamed from JETSON NANO BOARD
         def get_image(data):
-            # print("[INFO] IMAGE RECIEVED ...")
             self.COUNT_RECV_DATA += 1
             self.AVG_DATA_RATE = self.COUNT_RECV_DATA / \
                 (time.time()-self.START_TIME)
@@ -140,7 +121,6 @@ class ProcessImage(socketio.Client):
             b64_img = data["jpg_text"]
             del data["jpg_text"]
             self.trip_data = data
-            # print(data)
             img_buffer = base64.b64decode(b64_img)
             jpg_as_np = np.frombuffer(img_buffer, dtype=np.uint8)
             self.img_data = cv2.imdecode(jpg_as_np, flags=1)
@@ -149,8 +129,10 @@ class ProcessImage(socketio.Client):
         def disconnect():
             print("Disconnected from server...")
 
-        self.connect(ip)
-        self.middle_server_socket = MiddleServerSocket()
+        self.connect(ip) # connect to local server socket
+        self.middle_server_socket = MiddleServerSocket() # connect to  middle server socket
+        self.mpc_socket = ms.MappicoSocket(
+            tracker_id, self.trip_data, connect=self.connect, uid=uid, acctime=acctime, pushToken=pushtoken) # connect to mappico socket
 
     def load_landmark_model(self,path):
         #with tf.device("/gpu:0"):
@@ -182,8 +164,6 @@ class ProcessImage(socketio.Client):
         print("Program finished...")
         self.disconnect()
         cv2.destroyAllWindows()
-        # if not self.face_known:
-        #   train_face_recognizer.train_face_model(self.uid)
         self.vdo_writer.release()
         os._exit(0)
         # sys.exit(0)
@@ -237,14 +217,14 @@ class ProcessImage(socketio.Client):
 
         return frame
 
-    def dnn_process_img(self, frame):
-        blob = cv2.dnn.blobFromImage(frame, 1.0, (300, 300), [
+    def dnn_process_img(self,frame,process_frame):
+        blob = cv2.dnn.blobFromImage(process_frame, 1.0, (300, 300), [
             104, 117, 123], False, False)
         self.net.setInput(blob)
         with tf.device("/device:GPU:0"):
             faces = self.net.forward()
         HEIGHT, WIDTH, _ = frame.shape
-        gray_dnn = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray_dnn = cv2.cvtColor(process_frame, cv2.COLOR_BGR2GRAY)
         face_found = False
         for i in range(faces.shape[2]):
             if i > 0:
@@ -261,25 +241,9 @@ class ProcessImage(socketio.Client):
                 face = cv2.resize(original_face,(INPUT_SHAPE,INPUT_SHAPE),interpolation=cv2.INTER_AREA) # resize image 
                 grey_face = cv2.cvtColor(face,cv2.COLOR_BGR2GRAY) 
                 key_points = self.predict_face_landmark(grey_face,show_exec_time=True)
- #               print(key_points)
                 frame = self.draw_face(frame,(int(x2-x1),int(y2-y1)),(x1,y1),key_points)
-                # self.draw_face(
-                #     shape, frame, draw_landmarks_point=True)
-        # cv2.imshow("DNN {}".format(self.uid), frame)
         return (face_found, frame)
 
-    def cnn_process_img(self, frame):
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faceRects = self.cnnFaceDetector(gray, 0)
-        for faceRect in faceRects:
-            x1 = faceRect.rect.left()
-            y1 = faceRect.rect.top()
-            x2 = faceRect.rect.right()
-            y2 = faceRect.rect.bottom()
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 1)
-        return frame
-
-    # def face_identification(self):
 
     def predict_face(self, frame_gray):
         print("[INFO] PREDICTING DRIVER FACE ...")
@@ -341,12 +305,11 @@ class ProcessImage(socketio.Client):
                 else:
                     _,frame = self.cap.read()
                 process_frame = self.apply_clahe(frame)
-                frame = process_frame.copy()
                 process_frame = self.adjust_gamma(process_frame)
                 # process_frame = self.apply_sharpen(process_frame)
                 HEIGHT, WIDTH, _ = frame.shape
                 # END CHECKING KNOWN FACE BLOCK
-                _, frame = self.dnn_process_img(process_frame)
+                _, process_frame = self.dnn_process_img(frame,process_frame)
                 CURRENT_TIME = time.time()
                 if int(CURRENT_TIME - self.START_TIME) > self.PREV_TIME:
                     try:
@@ -359,15 +322,13 @@ class ProcessImage(socketio.Client):
                     self.TOTAL_EAR.append(self.ear)
                 # update previous time
                 self.PREV_TIME = int(CURRENT_TIME-self.START_TIME)
-                # self.vdo_writer.write(frame)
+                self.vdo_writer.write(frame) # capture frame as video
                 encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 35]
                 _, image = cv2.imencode(".jpg", frame, encode_param)
                 img_as_text = base64.b64encode(image)
                 self.trip_data["ear"] = self.AVG_EAR
                 self.trip_data["jpg_text"] = img_as_text.decode("utf-8")
-                #cv2.imshow("frame", frame)
-                if not self.TEST_MODE:
-                    self.middle_server_socket.emit("livestream",self.trip_data)
+                self.middle_server_socket.emit("livestream",self.trip_data)
                 key = cv2.waitKey(1) & 0xff
                 if key == 27:
                     break
@@ -400,16 +361,12 @@ if __name__ == "__main__":
             help="Enter push notification token")
     ap.add_argument("-tid", "--tracker-id", required=False, default="60000003",
             help="Enter tracker id")
-    ap.add_argument("--hog", required=False, default=False, type=bool,
-            help="Enter tracker id")
-    ap.add_argument("--dnn", required=False, default=True, type=bool,
-            help="Enter tracker id")
     ap.add_argument("--landmark-model", required=True, type=str,
         help="Path to landmark predictor model")
     ap.add_argument("--test",default=False,required=False, type=bool,
         help="Enable test mode")
     args = vars(ap.parse_args())
-    print("this is fucking ",args["test"])
+    print(args)
     args["userid"] = args["userid"].replace(" ", "", 1)
     process_image = ProcessImage(tracker_id=args["tracker_id"], uid=args["userid"], acctime=args["acctime"], token=args["token"], pushtoken=args["pushtoken"] ,test=args["test"] ) # CREATE OBJECT
     process_image.load_landmark_model(args["landmark_model"]) # LOAD LANDMARK MODEL
