@@ -45,9 +45,16 @@ class MappicoSocket:
         def disconnect():
             print("mappico's socket disconnected...")
 
-        self.sio.connect("https://iwapp.mappico.co.th")
+        self.connect_socket() # try to reconnect to server socket
         self.sio.emit("room", "MAPPICO")
         # self.sio.wait()
+    def connect_socket(self):
+        while True:
+            try:
+                self.sio.connect("https://iwapp.mappico.co.th")
+                break
+            except Exception as err:
+                print(err)
 
 if __name__ == "__main__":
     sock = MappicoSocket("60000003", dict())

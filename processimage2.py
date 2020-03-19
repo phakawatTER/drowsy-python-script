@@ -5,6 +5,7 @@ import base64
 import numpy as np
 from scipy.spatial import distance as dist
 from tensorflow.keras.models import load_model
+from tensorflow.keras.backend import set_session
 import tensorflow as tf
 import math
 import connect
@@ -25,15 +26,14 @@ import os
 import pickle
 from camera_api import ENDPOINT
 import json
+
+# Keras uses Tensorflow Backend
+sess = tf.Session()
+set_session(sess)
+
 current_directory = os.path.dirname(__file__)
 root_directory = "/home/phakawat/"
-# 60000003
 
-# # grab the indexes of the facial landmarks for the left and
-(lStart, lEnd) = face_utils.FACIAL_LANDMARKS_IDXS["left_eye"]
-(rStart, rEnd) = face_utils.FACIAL_LANDMARKS_IDXS["right_eye"]
-(mStart, mEnd) = face_utils.FACIAL_LANDMARKS_IDXS["mouth"]
-(innmStart, innmEnd) = face_utils.FACIAL_LANDMARKS_IDXS["inner_mouth"]
 EYE_AR_THRESH = 0.27
 EYE_AR_CONSEC_FRAMES = 3
 INPUT_SHAPE = 256
@@ -43,8 +43,6 @@ class ProcessImage(socketio.Client):
         current_directory, "opencv_face_detector_uint8.pb")
     DNN_MODEL_CONFIG = os.path.join(
         current_directory, "opencv_face_detector.pbtxt")
-    CNN_FACE_MODEL = os.path.join(
-        current_directory, "mmod_human_face_detector.dat")
     TEST_VIDEO_PATH = os.path.join(
         current_directory, "test_vdo.mp4")
     def __init__(self, ip="http://localhost:4000",tracker_id="", uid="", acctime="", token="", pushtoken="" ,test=False):
@@ -75,18 +73,17 @@ class ProcessImage(socketio.Client):
         self.COUNTER = 0
         if self.TEST_MODE : # if test mode is enabled
             self.cap = cv2.VideoCapture(ProcessImage.TEST_VIDEO_PATH)
-        # self.ddestimator = dde.ddestimator()
         self.api_connect = conn.Connect(
             token=token, uid=uid, acctime=acctime, expoPushToken=pushtoken)
         self.trip_data = {
             "uid":uid,
             "ear":0,
             "coor":(0,0),
-            "gas":{"CO":0,"LPG":0,"SMOKE":0}
+            "gas":{"co":0,"lpg":0,"smoke":0}
         }
         self.data_is_recv = False
         # create directory if it's not exist
-        if not os.path.exists(os.path.join(current_directory, "trip_vdo", self.uid)):
+        if not os.path.exists(os.path.join(root_directory, "trip_vdo", self.uid)):
             os.makedirs(os.path.join(root_directory, "trip_vdo", self.uid))
         self.vdo_writer = cv2.VideoWriter(os.path.join(root_directory, "trip_vdo", self.uid, "{}.avi".format(
             acctime)), cv2.VideoWriter_fourcc(*'DIVX'), 10, (1280, 720))
@@ -101,12 +98,10 @@ class ProcessImage(socketio.Client):
         except Exception as err:
             print(err)
             pass
-        
         # schedule to check if data is recieved
         # if data is not recieved anymore so proceed to terminate the process
         schedule.every(15).seconds.do(self.checkIfAlive)
-        # schedule.every(1).minutes.do(self.checkYawning)
-
+        schedule.every(2).seconds.do(self.update_obd_data)
         @self.event
         def connect():
             print("Connected to server...")
@@ -120,7 +115,7 @@ class ProcessImage(socketio.Client):
             self.current_val += 1
             b64_img = data["jpg_text"]
             del data["jpg_text"]
-            self.trip_data = data
+            self.trip_data.update(data)
             img_buffer = base64.b64decode(b64_img)
             jpg_as_np = np.frombuffer(img_buffer, dtype=np.uint8)
             self.img_data = cv2.imdecode(jpg_as_np, flags=1)
@@ -133,6 +128,20 @@ class ProcessImage(socketio.Client):
         self.middle_server_socket = MiddleServerSocket() # connect to  middle server socket
         self.mpc_socket = ms.MappicoSocket(
             tracker_id, self.trip_data, connect=self.connect, uid=uid, acctime=acctime, pushToken=pushtoken) # connect to mappico socket
+
+    def  update_obd_data(self):
+        try:
+            print(self.trip_data["gas"])
+            coor = self.trip_data["coor"]
+            direction = self.trip_data["direction"]
+            co = self.trip_data["gas"]["co"]
+            speed = self.trip_data["speed"]
+            data = {"acctime":self.acctime,"uid":self.uid,"latlng":coor,"speed":speed,"co":co,"direction":direction}
+            print(data)
+            self.emit("obd_update_data",data) # emit data to local server
+        except Exception as err:
+            print(err)
+            pass
 
     def load_landmark_model(self,path):
         #with tf.device("/gpu:0"):
@@ -335,6 +344,7 @@ class ProcessImage(socketio.Client):
                 self.TOTAL_FRAME += 1
                 self.AVG_FPS = round(self.TOTAL_FRAME /
                                      (time.time()-self.START_TIME), 2)
+ #               print([key for key in self.trip_data])
             except Exception as err:
                 print(err)
                 time.sleep(0.5)
