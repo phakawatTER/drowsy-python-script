@@ -21,14 +21,18 @@ class TensoflowFaceDector(object):
                 serialized_graph = fid.read()
                 od_graph_def.ParseFromString(serialized_graph)
                 tf.import_graph_def(od_graph_def, name='')
-            print(tf.contrib.graph_editor.get_tensors(tf.get_default_graph()))
+            model_nodes = (tf.contrib.graph_editor.get_tensors(tf.get_default_graph()))
+            model_nodes = [str(node) for node in model_nodes]
+            nodes_to_string = "\n".join(model_nodes)
+            with open("nodes.txt","w") as outfile:
+                outfile.write(nodes_to_string)
+            sys.exit(0)
 
         with self.detection_graph.as_default():
             config = tf.compat.v1.ConfigProto()
             config.gpu_options.allow_growth = True
             self.sess = tf.compat.v1.Session(graph=self.detection_graph, config=config)
             self.windowNotSet = True
-
 
 
     def run(self, image):

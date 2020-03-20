@@ -145,16 +145,14 @@ class ProcessImage(socketio.Client):
             pass
 
     def load_landmark_model(self,path):
-        #with tf.device("/gpu:0"):
         self.landmark_model = load_model(path)
-    
+
     def predict_face_landmark(self,face,show_exec_time=False):
         start = time.time()
         me = np.array(face)/255
         x_test = np.expand_dims(me, axis=0)
         x_test = np.expand_dims(x_test, axis=3)
-        with tf.device('/device:GPU:0'):  # use gpu for prediction
-            y_test = self.landmark_model.predict(x_test)
+        y_test = self.landmark_model.predict(x_test)
         label_points = (np.squeeze(y_test))
         stop = time.time()
         exec_time = round(stop-start,4)
@@ -231,8 +229,7 @@ class ProcessImage(socketio.Client):
         blob = cv2.dnn.blobFromImage(process_frame, 1.0, (300, 300), [
             104, 117, 123], False, False)
         self.net.setInput(blob)
-        with tf.device("/device:GPU:0"):
-            faces = self.net.forward()
+        faces = self.net.forward()
         HEIGHT, WIDTH, _ = frame.shape
         gray_dnn = cv2.cvtColor(process_frame, cv2.COLOR_BGR2GRAY)
         face_found = False
