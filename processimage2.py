@@ -314,6 +314,7 @@ class ProcessImage(socketio.Client):
                     frame = self.img_data
                 else:
                     _,frame = self.cap.read()
+                    frame = cv2.rotate(frame,cv2.ROTATE_180)
                 process_frame = self.apply_clahe(frame)
                 process_frame = self.adjust_gamma(process_frame)
                 # process_frame = self.apply_sharpen(process_frame)
