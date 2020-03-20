@@ -24,11 +24,10 @@ from threading import Thread
 import math
 import os
 import pickle
-from camera_api import ENDPOINT
 import json
 
 # Keras uses Tensorflow Backend
-sess = tf.Session()
+sess = tf.compat.v1.Session()
 set_session(sess)
 
 current_directory = os.path.dirname(__file__)
@@ -101,7 +100,9 @@ class ProcessImage(socketio.Client):
         # schedule to check if data is recieved
         # if data is not recieved anymore so proceed to terminate the process
         schedule.every(15).seconds.do(self.checkIfAlive)
-        schedule.every(2).seconds.do(self.update_obd_data)
+        if not self.TEST_MODE: # update trip data to database if not test mode
+            schedule.every(2).seconds.do(self.update_obd_data)
+
         @self.event
         def connect():
             print("Connected to server...")
