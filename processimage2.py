@@ -27,7 +27,9 @@ import pickle
 import json
 
 # Keras uses Tensorflow Backend
-sess = tf.Session()
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+sess = tf.Session(config=config)
 set_session(sess)
 
 current_directory = os.path.dirname(__file__)
@@ -309,9 +311,10 @@ class ProcessImage(socketio.Client):
                 schedule.run_pending()  # keep running pending scheduler.
                 if not self.TEST_MODE:
                     frame = self.img_data
+                    frame = cv2.rotate(frame,cv2.ROTATE_180)
+
                 else:
                     ret,frame = self.cap.read()
-                    frame = cv2.rotate(frame,cv2.ROTATE_180)
                     if not ret: # if video finsihed  then break the loop
                         break
                 process_frame = self.apply_clahe(frame)
