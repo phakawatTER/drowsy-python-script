@@ -27,7 +27,7 @@ import pickle
 import json
 
 # Keras uses Tensorflow Backend
-config = tf.ConfigProto()
+config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
 sess = tf.compat.v1.Session(config=config)
 set_session(sess) # set session for keras backend
@@ -51,7 +51,6 @@ class ProcessImage(socketio.Client):
         self.TEST_MODE = test 
         self.face_check = False
         self.face_known = False
-        self.FRAME_TIMELINE = []
         self.prev_val = 0
         self.current_val = 0
         self.uid = uid
@@ -59,36 +58,27 @@ class ProcessImage(socketio.Client):
         self.token = token
         self.pushtoken = pushtoken
         self.img_data = ""
-        self.ear = 0
-        self.TOTAL_FRAME = 0
-        self.START_TIME = time.time()
-        self.PREV_TIME = 0
-        self.TOTAL_EAR = []
-        self.AVG_FPS = 0
-        self.AVG_DATA_RATE = 0
-        self.COUNT_RECV_DATA = 0
-        self.FPS = 0
-        self.EYES_CLOSED_TIME = 0
-        self.AVG_EAR = 0.35
-        self.NEXT_SECOND = 0
-        self.COUNTER = 0
+        self.START_TIME = time.time() # use for determining duration of the trip
+        self.AVG_EAR = 0.35 # initial value for eye aspect ratio
         if self.TEST_MODE : # if test mode is enabled
             self.cap = cv2.VideoCapture(ProcessImage.TEST_VIDEO_PATH)
-        self.api_connect = conn.Connect(
+        self.api_connect = conn.Connect( 
             token=token, uid=uid, acctime=acctime, expoPushToken=pushtoken)
+        # data for to be streamed ...
         self.trip_data = {
             "uid":uid,
             "ear":0,
             "coor":(0,0),
             "gas":{"co":0,"lpg":0,"smoke":0}
         }
-        self.data_is_recv = False
-        # create directory if it's not exist
+        self.data_is_recv = False # bool to check if first data packet is received...
+
+       # create directory if it's not exist
         if not os.path.exists(os.path.join(root_directory, "trip_vdo", self.uid)):
             os.makedirs(os.path.join(root_directory, "trip_vdo", self.uid))
         self.vdo_writer = cv2.VideoWriter(os.path.join(root_directory, "trip_vdo", self.uid, "{}.avi".format(
             acctime)), cv2.VideoWriter_fourcc(*'DIVX'), 10, (1280, 720))
-
+        # SCHEDULER JOBS...
         # schedule to check if data is recieved
         # if data is not recieved anymore so proceed to terminate the process
         schedule.every(15).seconds.do(self.checkIfAlive)
@@ -101,9 +91,6 @@ class ProcessImage(socketio.Client):
 
         @self.on("image_{}".format(uid)) # receive image streamed from JETSON NANO BOARD
         def get_image(data):
-            self.COUNT_RECV_DATA += 1
-            self.AVG_DATA_RATE = self.COUNT_RECV_DATA / \
-                (time.time()-self.START_TIME)
             self.data_is_recv = True
             self.current_val += 1
             b64_img = data["jpg_text"]
@@ -153,7 +140,6 @@ class ProcessImage(socketio.Client):
         return label_points
 
     def checkIfAlive(self):
-        # print("I'm alive", str(self.current_val), str(self.prev_val))
         if self.data_is_recv:
             if self.prev_val != self.current_val:
                 self.prev_val = self.current_val
@@ -166,8 +152,6 @@ class ProcessImage(socketio.Client):
         cv2.destroyAllWindows()
         self.vdo_writer.release()
         os._exit(0)
-        # sys.exit(0)
-
 
     def draw_face(self,frame,face_shape,origin,key_points, draw_index=False, draw_point=True, draw_contour=False):
         x_points = key_points[::2]
@@ -305,18 +289,6 @@ class ProcessImage(socketio.Client):
                 HEIGHT, WIDTH, _ = frame.shape
                 # END CHECKING KNOWN FACE BLOCK
                 _, process_frame = self.dnn_process_img(frame,process_frame)
-                CURRENT_TIME = time.time()
-                if int(CURRENT_TIME - self.START_TIME) > self.PREV_TIME:
-                    try:
-                        self.AVG_EAR = round(
-                            sum(self.TOTAL_EAR)/len(self.TOTAL_EAR), 3)
-                        self.TOTAL_EAR = []
-                    except:
-                        pass
-                else:
-                    self.TOTAL_EAR.append(self.ear)
-                # update previous time
-                self.PREV_TIME = int(CURRENT_TIME-self.START_TIME)
                 self.vdo_writer.write(frame) # capture frame as video
                 encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 35]
                 _, image = cv2.imencode(".jpg", frame, encode_param)
@@ -327,9 +299,6 @@ class ProcessImage(socketio.Client):
                 key = cv2.waitKey(1) & 0xff
                 if key == 27:
                     break
-                self.TOTAL_FRAME += 1
-                self.AVG_FPS = round(self.TOTAL_FRAME /
-                                     (time.time()-self.START_TIME), 2)
             except Exception as err:
                 pass
 
