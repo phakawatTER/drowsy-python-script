@@ -14,6 +14,7 @@ import connect as conn
 import argparse
 import threading
 from middlesocket import MiddleServerSocket
+from ddestimator import ddestimator
 import sys
 import multiprocessing as mp
 import mappicosocket as ms
@@ -64,6 +65,7 @@ class ProcessImage(socketio.Client):
             self.cap = cv2.VideoCapture(ProcessImage.TEST_VIDEO_PATH)
         self.api_connect = conn.Connect( 
             token=token, uid=uid, acctime=acctime, expoPushToken=pushtoken)
+        self.ddestimator  = ddestimator() # ddestimator object
         # data for to be streamed ...
         self.trip_data = {
             "uid":uid,
@@ -160,7 +162,6 @@ class ProcessImage(socketio.Client):
         x1,y1 = origin
         scale_x = f_width/INPUT_SHAPE
         scale_y = f_height/INPUT_SHAPE
-        PADDING = 32
         x_points = np.array(x_points)*scale_x+x1
         x_points = x_points.astype(int)
         y_points = np.array(y_points)*scale_y+y1
@@ -187,18 +188,25 @@ class ProcessImage(socketio.Client):
             if draw_index:
                 cv2.putText(frame, str(i), (x, y), cv2.FONT_HERSHEY_SIMPLEX,
                             0.2, (255, 255, 255), 1, cv2.LINE_AA)
-        if draw_contour:
-            left_eye = np.array(coords[60:68]).reshape((-1, 1, 2)).astype(np.int32)
-            right_eye = np.array(coords[68:76]).reshape(
-                (-1, 1, 2)).astype(np.int32)
-            outer_mouth = np.array(coords[76:88]).reshape(
-                (-1, 1, 2)).astype(np.int32)
-            face_region = np.array(coords[0:33]).reshape(
-                (-1, 1, 2)).astype(np.int32)
-            cv2.drawContours(frame, [left_eye], -1, (0, 255, 0), 1)
-            cv2.drawContours(frame, [right_eye], -1, (0, 255, 0), 1)
-            cv2.drawContours(frame, [outer_mouth], -1, (0, 255, 0), 1)
 
+        return frame
+
+    def draw_contour(self,frame,coords,color=(0,255,0)):
+        # reshape given coordinates
+        region = np.array(coords).reshape((-1, 1, 2)).astype(np.int32)
+        frame = cv2.drawContours(frame, [region], -1,color, 1)
+        return frame
+
+
+    def draw_bounding_box(self,frame,coords):
+        """Draw bounding box over driver face"""
+        euler, rotation, translation = self.ddestimator.est_head_dir(coords)
+        _, _, gaze_D = self.ddestimator.est_gaze_dir(coords)
+        bc_2d_coords = self.ddestimator.proj_head_bounding_cube_coords(rotation, translation)
+        gl_2d_coords = self.ddestimator.proj_gaze_line_coords(
+             rotation, translation, gaze_D)
+#        frame = self.ddestimator.draw_gaze_line(frame, gl_2d_coords, (0, 255, 0), gaze_D)
+        frame = self.ddestimator.draw_bounding_cube(frame, bc_2d_coords, (255, 0, 0), euler)
         return frame
 
     def dnn_process_img(self,frame,process_frame):
@@ -222,8 +230,26 @@ class ProcessImage(socketio.Client):
                 y2 = int(faces[0, 0, i, 6] * HEIGHT)
                 original_face = frame[y1:y2 ,x1:x2] # get only face
                 face = cv2.resize(original_face,(INPUT_SHAPE,INPUT_SHAPE),interpolation=cv2.INTER_AREA) # resize image 
-                grey_face = cv2.cvtColor(face,cv2.COLOR_BGR2GRAY) 
-                key_points = self.predict_face_landmark(grey_face,show_exec_time=True)
+                grey_face = cv2.cvtColor(face,cv2.COLOR_BGR2GRAY)
+                face_width = x2-x1 
+                face_height = y2-y1 
+                scale_x = face_width/INPUT_SHAPE
+                scale_y = face_height/INPUT_SHAPE
+                key_points = self.predict_face_landmark(grey_face,show_exec_time=True) # predict facial landmark position
+                x_points = (np.array(key_points[::2])*scale_x + x1).astype(np.int32)
+                y_points = (np.array(key_points[1::2])*scale_y+ y1).astype(np.int32)
+                coords = list(zip(x_points,y_points))
+                # draw left eye contour
+                frame = self.draw_contour(frame,coords[60:68])
+                # draw right eye contour
+                frame = self.draw_contour(frame,coords[68:76])
+                # draw outer mouth contour
+                frame = self.draw_contour(frame,coords[76:88])
+                # draw inner mouth contour
+                frame = self.draw_contour(frame,coords[88:96])
+                # draw bounding cube
+                frame = self.draw_bounding_box(frame,coords)
+                # draw facail landmark points
                 frame = self.draw_face(frame,(int(x2-x1),int(y2-y1)),(x1,y1),key_points)
         return (face_found, frame)
 
@@ -300,6 +326,7 @@ class ProcessImage(socketio.Client):
                 if key == 27:
                     break
             except Exception as err:
+                print(err)
                 pass
 
         self.program_finish()

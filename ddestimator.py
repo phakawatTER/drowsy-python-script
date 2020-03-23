@@ -1,7 +1,6 @@
 from scipy.spatial import distance
 import numpy as np
 import imutils
-import dlib
 import cv2
 import time
 import math
@@ -18,7 +17,6 @@ class ddestimator:
 
     # TRAINED_MODEL_PATH = "C:/Users/peter/Desktop/drowsy-firebase-server/functions/drowsy-python-server/shape_predictor_68_face_landmarks.dat"
     def __init__(self, weights=[1.25, 0.5, 3, 1], purge=True):
-        self.detector = dlib.get_frontal_face_detector()
         self.start_time = int(round(time.time() * 1000))
         self.log = pd.DataFrame(data=[], columns=['ts', 'key', 'value'])
         self.log.set_index(['ts', 'key'])
@@ -26,37 +24,6 @@ class ddestimator:
         self.weights = weights
         self.calibration_offset = [0, 0, 0]
         self.has_calibrated = False
-
-    # Used the following code as reference: http://dlib.net/face_landmark_detection.py.html
-    def detect_faces(self,  frame, resize_to_width=None, use_gray=True):
-        # Faster prediction when frame is resized
-        if resize_to_width is not None:
-            frame = imutils.resize(frame, width=resize_to_width)
-        # If use_gray = True then convert frame used for detection in to grayscale
-        if use_gray:
-            dframe = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        else:
-            dframe = frame
-
-        # Detect faces in frame
-        faces_loc = self.detector(dframe, 0)
-
-        return faces_loc
-
-    def dlib_shape_to_points(self, shape, dtype=np.int32):
-        points = np.zeros((68, 2), dtype=dtype)
-
-        for j in range(0, 68):
-            points[j] = (shape.part(j).x, shape.part(j).y)
-
-        return points
-
-    def draw_points_on_face(self, frame, points, color):
-        for (x, y) in points:
-            cv2.circle(frame, (x, y), 1, color, -1)
-        return frame
-
-    # SERG MASIS ===============================================
 
     # These are the estimated 3D positions for 2D image points 17,21,22,26,36,39,42,45,31,35,48,54,57 & 8
     # taken from this model http://aifi.isr.uc.pt/Downloads/OpenGL/glAnthropometric3DModel.cpp (line 69)
@@ -139,8 +106,9 @@ class ddestimator:
 	'''
 
     def est_head_dir(self, points):
-        face_2d_anchor_pts = np.array([points[17], points[21], points[22], points[26], points[36], points[39], points[42],
-                                       points[45], points[31], points[35], points[48], points[54], points[57], points[8]], dtype=np.float32)
+        # for 98 facial landmark points
+        face_2d_anchor_pts = np.array([points[33], points[37], points[42], points[46], points[60], points[64], points[68],
+                                       points[72], points[55], points[59], points[76], points[82], points[85], points[16]], dtype=np.float32)
 
         # Get rotation and translation vectors for points and taking in account camera parameters
         _, rotvec, transvec = cv2.solvePnP(ddestimator.FACE_3D_ANCHOR_PTS,
@@ -254,13 +222,13 @@ class ddestimator:
 
     def est_gaze_dir(self, points):
         L_L = (distance.euclidean(
-            points[37], points[36]) + distance.euclidean(points[41], points[36]))/2
+            points[61], points[60]) + distance.euclidean(points[67], points[60]))/2
         L_R = (distance.euclidean(
-            points[38], points[39]) + distance.euclidean(points[40], points[39]))/2
+            points[63], points[64]) + distance.euclidean(points[65], points[64]))/2
         R_L = (distance.euclidean(
-            points[43], points[42]) + distance.euclidean(points[47], points[42]))/2
+            points[69], points[68]) + distance.euclidean(points[75], points[68]))/2
         R_R = (distance.euclidean(
-            points[44], points[45]) + distance.euclidean(points[46], points[45]))/2
+            points[71], points[72]) + distance.euclidean(points[73], points[72]))/2
         L_ratio = abs((L_L / L_R) - 1)/0.25
         R_ratio = abs((R_L / R_R) - 1)/0.25
         gaze_L = math.degrees(0.3926991 * L_ratio)
