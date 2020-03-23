@@ -5,7 +5,7 @@ import base64
 import numpy as np
 from scipy.spatial import distance as dist
 from tensorflow.keras.models import load_model
-from tensorflow.keras.backend import set_session
+#from tensorflow.keras.backend import set_session
 import tensorflow as tf
 import math
 import connect
@@ -27,10 +27,8 @@ import pickle
 import json
 
 # Keras uses Tensorflow Backend
-config = tf.ConfigProto()
-config.gpu_options.allow_growth = True
-sess = tf.compat.v1.Session(config=config)
-set_session(sess) # set session for keras backend
+#sess = tf.Session()
+#set_session(sess)
 
 current_directory = os.path.dirname(__file__)
 root_directory = "/home/phakawat/"
@@ -88,7 +86,17 @@ class ProcessImage(socketio.Client):
             os.makedirs(os.path.join(root_directory, "trip_vdo", self.uid))
         self.vdo_writer = cv2.VideoWriter(os.path.join(root_directory, "trip_vdo", self.uid, "{}.avi".format(
             acctime)), cv2.VideoWriter_fourcc(*'DIVX'), 10, (1280, 720))
-
+        # try to use recognizer if driver face has been learned before
+        # if it fails just pass
+        try:
+            self.face_recognizer = cv2.face.LBPHFaceRecognizer_create()
+            print(os.path.join(current_directory,
+                               "training_set", uid, "trainer.yml"))
+            self.face_recognizer.read(os.path.join(
+                current_directory, "training_set", uid, "trainer.yml"))
+        except Exception as err:
+            print(err)
+            pass
         # schedule to check if data is recieved
         # if data is not recieved anymore so proceed to terminate the process
         schedule.every(15).seconds.do(self.checkIfAlive)
@@ -244,6 +252,14 @@ class ProcessImage(socketio.Client):
         return (face_found, frame)
 
 
+    def predict_face(self, frame_gray):
+        print("[INFO] PREDICTING DRIVER FACE ...")
+        _id, conf = self.face_recognizer.predict(frame_gray)
+        print("face id:{} recognition confidence is {}% ".format(_id, conf % 100))
+        if conf >= 40 and conf <= 100:
+            return True
+        return False
+
     # a function to be called when program finished and if detect new face
     def train_new_face(self):
         pass
@@ -293,10 +309,9 @@ class ProcessImage(socketio.Client):
                 schedule.run_pending()  # keep running pending scheduler.
                 if not self.TEST_MODE:
                     frame = self.img_data
-                    frame = cv2.rotate(frame,cv2.ROTATE_180)
-
                 else:
                     ret,frame = self.cap.read()
+                    frame = cv2.rotate(frame,cv2.ROTATE_180)
                     if not ret: # if video finsihed  then break the loop
                         break
                 process_frame = self.apply_clahe(frame)
@@ -330,12 +345,23 @@ class ProcessImage(socketio.Client):
                 self.TOTAL_FRAME += 1
                 self.AVG_FPS = round(self.TOTAL_FRAME /
                                      (time.time()-self.START_TIME), 2)
+ #               print([key for key in self.trip_data])
             except Exception as err:
+                print(err)
+                time.sleep(0.5)
                 pass
 
         self.program_finish()
 
     # END FUNCTION "run"
+
+    def eye_aspect_ratio(self, eye):
+        A = dist.euclidean(eye[1], eye[5])
+        B = dist.euclidean(eye[2], eye[4])
+        C = dist.euclidean(eye[0], eye[3])
+        ear = (A + B) / (2.0 * C)
+        return ear
+
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
@@ -351,6 +377,7 @@ if __name__ == "__main__":
     ap.add_argument("--test",default=False,required=False, type=bool,
         help="Enable test mode")
     args = vars(ap.parse_args())
+    print(args)
     args["userid"] = args["userid"].replace(" ", "", 1)
     process_image = ProcessImage(tracker_id=args["tracker_id"], uid=args["userid"], acctime=args["acctime"], token=args["token"], pushtoken=args["pushtoken"] ,test=args["test"] ) # CREATE OBJECT
     process_image.load_landmark_model(args["landmark_model"]) # LOAD LANDMARK MODEL
