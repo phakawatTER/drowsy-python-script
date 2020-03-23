@@ -24,9 +24,10 @@ class Connect:
         self.expoPushToken = None
         pass
 
-    def authenticate(self, username, password):
+    def authenticate(self, username, password,tracker_id):
         payload = {"username": username,
-                   "password": password, "from": "camera"}
+                   "password": password,
+                   "from": "camera"}
         req = requests.post(url=API_LOGIN, data=payload ,timeout=1.5)
         response = req.json()
         # print(response)
@@ -35,17 +36,17 @@ class Connect:
             self.token = self.userInfo["token"]
             self.expoPushToken = self.userInfo["expoPushToken"]
             self.uid = self.userInfo["uid"]
-            self.generateACC()
+            self.generateACC(tracker_id)
             return True
         else:
             print("Failed to connect to server")
             return False
        
-    def generateACC(self):
+    def generateACC(self,tracker_id):
         payload = {"uid": self.uid,
+                    "tracker_id":tracker_id,
                    "pushToken": self.expoPushToken, "token": self.token}
         req = requests.post(url=API_CREATE_TRIP, data=payload)
-        print(req.text)
         response = json.loads(req.text)
         self.acctime = response["acctime"]
         return print(f"YOUR ACCTIME IS {self.acctime}")

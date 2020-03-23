@@ -1,5 +1,5 @@
 from scipy.spatial import distance as dist
-# from imutils.video import VideoStream
+import sys
 import os
 from imutils import face_utils
 import numpy as np
@@ -68,7 +68,7 @@ while not IS_AUTH:
         email = args["username"]
         password = args["password"]
         IS_AUTH = connect.authenticate(email, hashlib.sha512(
-            bytes(f"{password}{SECRET}", encoding="utf-8")).hexdigest())
+            bytes(f"{password}{SECRET}", encoding="utf-8")).hexdigest(),TRACKER_ID)
         if IS_AUTH:
             break
         else:
@@ -81,9 +81,6 @@ ACCTIME = connect.acctime  # ACCTIME
 UID = connect.uid  # USER ID
 PUSH_TOKEN = connect.expoPushToken
 server_socket = ss.ServerSokcet(uid=UID)
-mappico_socket = Process(target=ms.MappicoSocket, args=(
-    TRACKER_ID, trip_data, connect, UID, ACCTIME, PUSH_TOKEN))
-mappico_socket.start()
 print(f"UID:{UID},ACCTIME:{ACCTIME}")
 
 
@@ -112,31 +109,6 @@ def updateGasData():
             pass
 
 
-def updateCoordinate():
-    global ACCTIME, CO, LPG, SMOKE, LATLNG
-    while not PROGRAM_FINISHED:
-        wait_time = 2
-        try:
-            lat = trip_data["lat"]
-            lon = trip_data["lon"]
-            speed = trip_data["speed"]
-            direction = trip_data["direction"]
-            LATLNG = (lat, lon)
-            start_time = time.time()
-            connect.updateTripData(CO, LATLNG, speed, direction)
-            stop_time = time.time()
-            # to make sure that the the value is updated every 2 seconds
-            if wait_time - (stop_time-start_time) > 0:
-                time.sleep(wait_time - (stop_time-start_time))
-            # print(
-            #     f"coords:({lat},{lon})\nspeed:{speed}\ndirection:{direction}")
-            # print("___________________________________________________________")
-        except Exception as err:
-            print(err)
-            time.sleep(wait_time)
-            pass
-
-
 COUNTER = 0
 TOTAL = 0
 # TIME WHEN EYES ARE CLOSED AND NEXR SECOND
@@ -149,13 +121,10 @@ if READING_SERIAL:
     print("START UPDATE_GAS THREAD...")
     GAS_THREAD = Thread(target=updateGasData)
     GAS_THREAD.start()
-print("START UPDATE_GPS THREAD...")
-COORDS_THREAD = Thread(target=updateCoordinate)
-COORDS_THREAD.start()
 
 START_TIME = time.time()
 PREV_TIME = 0
-TOTAL_FRAME = 10
+TOTAL_FRAME = 0
 AVG_FRAME = 10
 FPS = 0
 # WIDTH = 240
@@ -173,24 +142,27 @@ while True:
         ret, frame = cap.read()
         HEIGHT, WIDTH, _ = frame.shape
         # set quality of image
-        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 55]
+        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
         result, image = cv2.imencode(".jpg", frame, encode_param)
         img_as_text = base64.b64encode(image)
         # cv2.imshow("frame",frame)
-
+	# Send data through socket
         server_socket.sendImage(
             jpg_text=img_as_text,
-            coor=LATLNG, ear=ear,
+#            coor=LATLNG, ear=ear,
             gas={
                 "co": CO,
                 "lpg": LPG,
                 "smoke": SMOKE
             },
-            direction=DIRECTION,
-            speed=SPEED,
-            fps=AVG_FRAME,
-            eye_close_time=EYES_CLOSED_TIME
+#            direction=DIRECTION,
+#            speed=SPEED,
+#            fps=AVG_FRAME,
+#            eye_close_time=EYES_CLOSED_TIME
         )
+        TOTAL_FRAME +=1 
+        sys.stdout.write("\rFrame {} sent...".format(TOTAL_FRAME))
+        sys.stdout.flush()         
         key = cv2.waitKey(1) & 0xff
         if key == 27:
             break
