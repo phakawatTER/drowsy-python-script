@@ -26,6 +26,8 @@ import math
 import os
 import pickle
 import json
+from cal_face import cal_face
+
 
 # Keras uses Tensorflow Backend
 config = tf.compat.v1.ConfigProto()
@@ -38,15 +40,15 @@ root_directory = "/home/phakawat/"
 
 EYE_AR_THRESH = 0.27
 EYE_AR_CONSEC_FRAMES = 3
-INPUT_SHAPE = 256
-
+#INPUT_SHAPE = 256
+INPUT_SHAPE = 128
 class ProcessImage(socketio.Client):
     DNN_MODEL_FILE = os.path.join(
         current_directory, "opencv_face_detector_uint8.pb")
     DNN_MODEL_CONFIG = os.path.join(
         current_directory, "opencv_face_detector.pbtxt")
     TEST_VIDEO_PATH = os.path.join(
-        current_directory, "test_vdo.mp4")
+        current_directory, "/home/phakawat/vdo2.mp4")
     def __init__(self, ip="http://localhost:4000",tracker_id="", uid="", acctime="", token="", pushtoken="" ,test=False):
         socketio.Client.__init__(self)
         self.TEST_MODE = test 
@@ -61,10 +63,12 @@ class ProcessImage(socketio.Client):
         self.img_data = ""
         self.START_TIME = time.time() # use for determining duration of the trip
         self.AVG_EAR = 0.35 # initial value for eye aspect ratio
+        self.MAR = 0.1 # initial value for mouth aspect ratio
         if self.TEST_MODE : # if test mode is enabled
             self.cap = cv2.VideoCapture(ProcessImage.TEST_VIDEO_PATH)
         self.api_connect = conn.Connect( 
             token=token, uid=uid, acctime=acctime, expoPushToken=pushtoken)
+        self.cal_face = cal_face() # cal_face object to store log of facial expression
         self.ddestimator  = ddestimator() # ddestimator object
         # data for to be streamed ...
         self.trip_data = {
@@ -129,11 +133,14 @@ class ProcessImage(socketio.Client):
         self.landmark_model = load_model(path)
 
     def predict_face_landmark(self,face,show_exec_time=False):
+        #face = cv2.cvtColor(face,cv2.COLOR_BGR2GRAY)
         start = time.time()
         me = np.array(face)/255
-        x_test = np.expand_dims(me, axis=0)
-        x_test = np.expand_dims(x_test, axis=3)
-        y_test = self.landmark_model.predict(x_test)
+        h,w,c = me.shape
+        me = me.reshape((1,h,w,c))
+        #x_test = np.expand_dims(me, axis=0)
+        #x_test = np.expand_dims(x_test, axis=3)
+        y_test = self.landmark_model.predict(me)
         label_points = (np.squeeze(y_test))
         stop = time.time()
         exec_time = round(stop-start,4)
@@ -155,7 +162,7 @@ class ProcessImage(socketio.Client):
         self.vdo_writer.release()
         os._exit(0)
 
-    def draw_face(self,frame,face_shape,origin,key_points, draw_index=False, draw_point=True, draw_contour=False):
+    def draw_face(self,frame,face_shape,origin,key_points):
         x_points = key_points[::2]
         y_points = key_points[1::2]
         f_width,f_height  = face_shape
@@ -185,16 +192,13 @@ class ProcessImage(socketio.Client):
             elif i in range(96, 98):  # pupils
                 COLOR = (0, 255, 0)
             cv2.circle(frame, (x, y), 0, COLOR, 2)
-            if draw_index:
-                cv2.putText(frame, str(i), (x, y), cv2.FONT_HERSHEY_SIMPLEX,
-                            0.2, (255, 255, 255), 1, cv2.LINE_AA)
 
         return frame
 
     def draw_contour(self,frame,coords,color=(0,255,0)):
         # reshape given coordinates
         region = np.array(coords).reshape((-1, 1, 2)).astype(np.int32)
-        frame = cv2.drawContours(frame, [region], -1,color, 1)
+        frame = cv2.drawContours(frame, [region], -1,color, 2)
         return frame
 
 
@@ -203,9 +207,9 @@ class ProcessImage(socketio.Client):
         euler, rotation, translation = self.ddestimator.est_head_dir(coords)
         _, _, gaze_D = self.ddestimator.est_gaze_dir(coords)
         bc_2d_coords = self.ddestimator.proj_head_bounding_cube_coords(rotation, translation)
-        gl_2d_coords = self.ddestimator.proj_gaze_line_coords(
-             rotation, translation, gaze_D)
-#        frame = self.ddestimator.draw_gaze_line(frame, gl_2d_coords, (0, 255, 0), gaze_D)
+        #gl_2d_coords = self.ddestimator.proj_gaze_line_coords(
+        #     rotation, translation, gaze_D)
+        #frame = self.ddestimator.draw_gaze_line(frame, gl_2d_coords, (0, 255, 0), gaze_D)
         frame = self.ddestimator.draw_bounding_cube(frame, bc_2d_coords, (255, 0, 0), euler)
         return frame
 
@@ -230,15 +234,24 @@ class ProcessImage(socketio.Client):
                 y2 = int(faces[0, 0, i, 6] * HEIGHT)
                 original_face = frame[y1:y2 ,x1:x2] # get only face
                 face = cv2.resize(original_face,(INPUT_SHAPE,INPUT_SHAPE),interpolation=cv2.INTER_AREA) # resize image 
-                grey_face = cv2.cvtColor(face,cv2.COLOR_BGR2GRAY)
                 face_width = x2-x1 
                 face_height = y2-y1 
                 scale_x = face_width/INPUT_SHAPE
                 scale_y = face_height/INPUT_SHAPE
-                key_points = self.predict_face_landmark(grey_face,show_exec_time=True) # predict facial landmark position
+                key_points = self.predict_face_landmark(face,show_exec_time=False) # predict facial landmark position
                 x_points = (np.array(key_points[::2])*scale_x + x1).astype(np.int32)
                 y_points = (np.array(key_points[1::2])*scale_y+ y1).astype(np.int32)
                 coords = list(zip(x_points,y_points))
+                avg_ear,_,_ = self.cal_face.cal_ear_98(coords)
+                mar = self.cal_face.cal_mar_98(coords)
+                is_yawn = self.cal_face.check_yawn() # check if user is yawning ...
+                ear_log = self.cal_face.get_log(self.cal_face.ear_log,period=2) # check back 5 seconds for ear log
+                mar_log = self.cal_face.get_log(self.cal_face.mar_log,period=3) # check back 5seconds for mar log
+#                self.cal_face.store_gaze_dir(direction) # store face gaze direction
+                # check if ear avg ear over time
+                ear_ot = np.mean(ear_log.values,axis=0)[1]
+                self.AVG_EAR = avg_ear
+                self.MAR = mar
                 # draw left eye contour
                 frame = self.draw_contour(frame,coords[60:68])
                 # draw right eye contour
@@ -253,10 +266,6 @@ class ProcessImage(socketio.Client):
                 frame = self.draw_face(frame,(int(x2-x1),int(y2-y1)),(x1,y1),key_points)
         return (face_found, frame)
 
-
-    # a function to be called when program finished and if detect new face
-    def train_new_face(self):
-        pass
 
     def adjust_gamma(self,image, gamma=1.0):
         invGamma = 1.0 / gamma
@@ -304,7 +313,6 @@ class ProcessImage(socketio.Client):
                 if not self.TEST_MODE:
                     frame = self.img_data
                     frame = cv2.rotate(frame,cv2.ROTATE_180)
-
                 else:
                     ret,frame = self.cap.read()
                     if not ret: # if video finsihed  then break the loop
@@ -319,12 +327,11 @@ class ProcessImage(socketio.Client):
                 encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 35]
                 _, image = cv2.imencode(".jpg", frame, encode_param)
                 img_as_text = base64.b64encode(image)
-                self.trip_data["ear"] = self.AVG_EAR
+                self.trip_data["ear"] = self.AVG_EAR # eye aspect ratio
+                self.trip_data["mar"] = self.MAR # mouth aspect ratio
                 self.trip_data["jpg_text"] = img_as_text.decode("utf-8")
                 self.middle_server_socket.emit("livestream",self.trip_data)
-                key = cv2.waitKey(1) & 0xff
-                if key == 27:
-                    break
+
             except Exception as err:
                 print(err)
                 pass
