@@ -1,6 +1,7 @@
 import socketio
 import cv2
 from imutils import face_utils
+import datetime 
 import base64
 import numpy as np
 from scipy.spatial import distance as dist
@@ -8,7 +9,6 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras.backend import set_session
 import tensorflow as tf
 import math
-import connect
 import time
 import connect as conn
 import argparse
@@ -18,7 +18,6 @@ from ddestimator import ddestimator
 import sys
 import multiprocessing as mp
 import mappicosocket as ms
-import connect as conn
 import schedule
 import base64
 from threading import Thread
@@ -38,8 +37,6 @@ set_session(sess) # set session for keras backend
 current_directory = os.path.dirname(__file__)
 root_directory = "/home/phakawat/"
 
-EYE_AR_THRESH = 0.27
-EYE_AR_CONSEC_FRAMES = 3
 #INPUT_SHAPE = 256
 INPUT_SHAPE = 128
 class ProcessImage(socketio.Client):
@@ -47,9 +44,15 @@ class ProcessImage(socketio.Client):
         current_directory, "opencv_face_detector_uint8.pb")
     DNN_MODEL_CONFIG = os.path.join(
         current_directory, "opencv_face_detector.pbtxt")
-    TEST_VIDEO_PATH = os.path.join(
-        current_directory, "/home/phakawat/vdo2.mp4")
-    def __init__(self, ip="http://localhost:4000",tracker_id="", uid="", acctime="", token="", pushtoken="" ,test=False):
+
+
+    EYECLOSE_THRESHOLD = 0.26
+    REQUEST_INTERVAL = 5 # seconds
+    GAZE_REQUEST_TIME = None
+    EYECLOSE_REQUEST_TIME = None
+    FATIGUE_REQUEST_TIME = None
+
+    def __init__(self, ip="http://localhost:4000",tracker_id="", uid="", acctime="", token="",pushtoken="",test=False,test_vdo_path=""):
         socketio.Client.__init__(self)
         self.TEST_MODE = test 
         self.face_check = False
@@ -65,13 +68,15 @@ class ProcessImage(socketio.Client):
         self.AVG_EAR = 0.35 # initial value for eye aspect ratio
         self.MAR = 0.1 # initial value for mouth aspect ratio
         if self.TEST_MODE : # if test mode is enabled
-            self.cap = cv2.VideoCapture(ProcessImage.TEST_VIDEO_PATH)
+            self.cap = cv2.VideoCapture(test_vdo_path)
         self.api_connect = conn.Connect( 
             token=token, uid=uid, acctime=acctime, expoPushToken=pushtoken)
         self.cal_face = cal_face() # cal_face object to store log of facial expression
         self.ddestimator  = ddestimator() # ddestimator object
         # data for to be streamed ...
         self.trip_data = {
+            "speed":0,
+            "direction":0,
             "uid":uid,
             "ear":0,
             "coor":(0,0),
@@ -116,6 +121,7 @@ class ProcessImage(socketio.Client):
             tracker_id, self.trip_data, connect=self.connect, uid=uid, acctime=acctime, pushToken=pushtoken) # connect to mappico socket
 
     def  update_obd_data(self):
+        print("updating")
         try:
             print(self.trip_data["gas"])
             coor = self.trip_data["coor"]
@@ -213,7 +219,7 @@ class ProcessImage(socketio.Client):
         frame = self.ddestimator.draw_bounding_cube(frame, bc_2d_coords, (255, 0, 0), euler)
         return frame
 
-    def dnn_process_img(self,frame,process_frame):
+    def process_img(self,frame,process_frame):
         blob = cv2.dnn.blobFromImage(process_frame, 1.0, (300, 300), [
             104, 117, 123], False, False)
         self.net.setInput(blob)
@@ -244,12 +250,82 @@ class ProcessImage(socketio.Client):
                 coords = list(zip(x_points,y_points))
                 avg_ear,_,_ = self.cal_face.cal_ear_98(coords)
                 mar = self.cal_face.cal_mar_98(coords)
-                is_yawn = self.cal_face.check_yawn() # check if user is yawning ...
+
+                #  check facial status 
+                yawn = self.cal_face.check_yawn(duration=6) # check if user is yawning ...
+                is_yawning,_,_= yawn
+                eye_close ,eye_close_ot = self.cal_face.check_eye(duration=1)
+                print(f"FACIAL LOG YAWN_STATUS:{yawn} EYE_CLOSE:{eye_close} EAR:{avg_ear} MAR:{mar}")
+                # get facial log to determi
                 ear_log = self.cal_face.get_log(self.cal_face.ear_log,period=2) # check back 5 seconds for ear log
                 mar_log = self.cal_face.get_log(self.cal_face.mar_log,period=3) # check back 5seconds for mar log
+
+                # EYES WARNING
+                if eye_close_ot  <  ProcessImage.EYECLOSE_THRESHOLD :
+                    now = datetime.datetime.now()
+                    event = "Dangerous Eye Close"
+                    latlng = self.trip_data["coor"]
+                    speed = self.trip_data["speed"]
+                    uid = self.uid
+                    acctime = self.acctime
+                    pushToken = self.pushtoken
+                    try:
+                        timediff = now - ProcessImage.EYECLOSE_REQUEST_TIME
+                        second_diff = timediff.seconds
+                        if second_diff >= ProcessImage.REQUEST_INTERVAL:
+                            ProcessImage.EYECLOSE_REQUEST_TIME = now # update latest request time
+                            print("Requesting for notification event:{}".format(event))
+            #def pushnotification(self, event, latlng, direction, speed, uid=None, acctime=None, pushToken=None):  
+                          #make request for mobile notification
+                            try:
+                                request_proc = mp.Process(target=self.api_connect.pushnotification,args=(event,latlng,speed,uid,acctime,pushToken))
+                                request_proc.start() # start request process
+                            except:
+                                pass
+                    except:
+                        ProcessImage.EYECLOSE_REQUEST_TIME = datetime.datetime.now()
+                        try:
+                        # make request for mobile notification
+                            request_proc = mp.Process(target=self.api_connect.pushnotification,args=(event,latlng,speed,uid,acctime,pushToken))
+                            request_proc.start() # start request process
+                        except:
+                            pass
+
+
+                # FATIGUE WARNING  ---> Let  Yawning == Fatigue
+                if is_yawning:
+                    now = datetime.datetime.now()
+                    event = "Fatigue"
+                    latlng = self.trip_data["coor"]
+                    speed = self.trip_data["speed"]
+                    uid = self.uid
+                    acctime = self.acctime
+                    pushToken = self.pushtoke
+                    try:
+                        timediff = now - ProcessImage.FATIGUE_REQUEST_TIME
+                        second_diff = timediff.seconds
+                        if second_diff >= ProcessImage.REQUEST_INTERVAL:
+                            ProcessImage.FATIGUE_REQUEST_TIME = now
+                            try:
+                                request_proc = mp.Process(target=self.api_connect.pushnotification,args=(event,latlng,speed,uid,acctime,pushToken))
+                                request_proc.start() # start request process
+                            except:
+                                pass
+                    except:
+                        ProcessImage.FATIGUE_REQUEST_TIME =  now
+                        try:
+                            request_proc = mp.Process(target=self.api_connect.pushnotification,args=(event,latlng,speed,uid,acctime,pushToken))
+                            request_proc.start() # start request proces
+                        except:
+                            pass
+
+
+
+
 #                self.cal_face.store_gaze_dir(direction) # store face gaze direction
                 # check if ear avg ear over time
                 ear_ot = np.mean(ear_log.values,axis=0)[1]
+#                print("eye aspect ratio (over time):{}".format(ear_ot))
                 self.AVG_EAR = avg_ear
                 self.MAR = mar
                 # draw left eye contour
@@ -305,14 +381,12 @@ class ProcessImage(socketio.Client):
                 name for name in os.listdir(training_set_directory) if not os.path.isfile(os.path.join(training_set_directory, name))])
         except:
             number_of_driver = 0
-        resize_scale = 0.7
-        max_training_set = 60
         while True:
             try:
                 schedule.run_pending()  # keep running pending scheduler.
                 if not self.TEST_MODE:
                     frame = self.img_data
-                    frame = cv2.rotate(frame,cv2.ROTATE_180)
+                    #frame = cv2.rotate(frame,cv2.ROTATE_180)
                 else:
                     ret,frame = self.cap.read()
                     if not ret: # if video finsihed  then break the loop
@@ -322,7 +396,7 @@ class ProcessImage(socketio.Client):
                 # process_frame = self.apply_sharpen(process_frame)
                 HEIGHT, WIDTH, _ = frame.shape
                 # END CHECKING KNOWN FACE BLOCK
-                _, process_frame = self.dnn_process_img(frame,process_frame)
+                _, process_frame = self.process_img(frame,process_frame)
                 self.vdo_writer.write(frame) # capture frame as video
                 encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 35]
                 _, image = cv2.imencode(".jpg", frame, encode_param)
@@ -353,9 +427,10 @@ if __name__ == "__main__":
         help="Path to landmark predictor model")
     ap.add_argument("--test",default=False,required=False, type=bool,
         help="Enable test mode")
+    ap.add_argument("-vdo","--vdo-path",required=False,help="Path to test VDO file")
     args = vars(ap.parse_args())
     args["userid"] = args["userid"].replace(" ", "", 1)
-    process_image = ProcessImage(tracker_id=args["tracker_id"], uid=args["userid"], acctime=args["acctime"], token=args["token"], pushtoken=args["pushtoken"] ,test=args["test"] ) # CREATE OBJECT
+    process_image = ProcessImage(tracker_id=args["tracker_id"], uid=args["userid"], acctime=args["acctime"], token=args["token"], pushtoken=args["pushtoken"] ,test=args["test"],test_vdo_path=args["vdo_path"] ) # CREATE OBJECT
     process_image.load_landmark_model(args["landmark_model"]) # LOAD LANDMARK MODEL
     process_image.run() # RUN PROCESSING IMAGE PROCESS
 

@@ -76,6 +76,14 @@ class cal_face():
             yawn = True
         return (yawn,mean_ear,mean_mar)
 
+    def check_eye(self,duration=1.0):
+        stop_time = self.ear_log.values[self.ear_log.values.shape[0]-1][0] - duration
+        ear_result = self.ear_log[self.ear_log.timestamp >= stop_time]
+        mean_ear =  np.mean(ear_result,axis=0)[1]
+        eye_close = mean_ear < cal_face.eyes_close_threshold
+        return (eye_close,mean_ear)
+
+
 
 if __name__ == "__main__":
     fe = cal_face()

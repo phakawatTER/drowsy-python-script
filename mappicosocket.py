@@ -20,6 +20,7 @@ class MappicoSocket:
 
         @self.sio.on("obd_updated")
         def trip_updated(data):
+            print(data)
             if data["id"] == self.TRACKER_ID:
                 lat = data["lat"]
                 lon = data["lon"]
@@ -28,6 +29,8 @@ class MappicoSocket:
                 del data["lat"]
                 del data["lon"]
                 trip_data.update(data)
+#                print(data)
+
 
         @self.sio.on("obd_updated_event")
         def event_updated(data):
@@ -57,4 +60,9 @@ class MappicoSocket:
                 print(err)
 
 if __name__ == "__main__":
-    sock = MappicoSocket("60000003", dict())
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("-id","--tracker-id",default="60000003",required=False,help="Tracker ID")
+    args = vars(ap.parse_args())
+    tracker_id = args["tracker_id"]
+    sock = MappicoSocket(tracker_id, dict())
