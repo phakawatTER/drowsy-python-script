@@ -30,8 +30,8 @@ class Connect:
                    "from": "camera"}
         req = requests.post(url=API_LOGIN, data=payload ,timeout=1.5)
         response = req.json()
-        # print(response)
         if (response["code"] == 200):
+            print("Generating \"ACCTIME\"")
             self.userInfo = response["userInfo"]
             self.token = self.userInfo["token"]
             self.expoPushToken = self.userInfo["expoPushToken"]
@@ -46,10 +46,11 @@ class Connect:
         payload = {"uid": self.uid,
                     "tracker_id":tracker_id,
                    "pushToken": self.expoPushToken, "token": self.token}
+        print("API_CREATE_TRIP",API_CREATE_TRIP,payload)
         req = requests.post(url=API_CREATE_TRIP, data=payload)
         response = json.loads(req.text)
         self.acctime = response["acctime"]
-        return print(f"YOUR ACCTIME IS {self.acctime}")
+        print(f"YOUR ACCTIME IS {self.acctime}")
 
     def pushnotification(self, event, latlng, direction, speed, uid=None, acctime=None, pushToken=None):
         if uid == None:

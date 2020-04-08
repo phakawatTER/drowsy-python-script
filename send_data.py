@@ -21,21 +21,35 @@ import serversocket as ss
 import hashlib
 import base64
 
+current_dir = os.path.dirname(__file__)
+def str2bool(v):
+    v = v.lower()
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
-ap.add_argument("-t", "--test",default=False,type=bool, required=False, help="ENABLE TEST MODE")
-ap.add_argument("-r", "--serial", required=False,default=False,type=bool, help="ENABLE READING SERIAL")
+ap.add_argument("-t", "--test",default=False,type=str2bool, required=False, help="ENABLE TEST MODE")
+ap.add_argument("-rs", "--read-serial", required=False,default=False,type=str2bool, help="ENABLE READING SERIAL")
 ap.add_argument("-u", "--username", required=True,
                 help="Please enter your username ")
 ap.add_argument("-p", "--password", required=True,
                 help="Please enter your password")
+ap.add_argument("-r","--rotate",required=False,default=True,help="rotate sent image",type=str2bool)
 ap.add_argument("-c", "--cam", required=False, default=0,
                 type=int, help="Enter camera to be used")
 
 args = vars(ap.parse_args())
+ROTATE_IMAGE = args["rotate"]
 TEST_BOOL = args["test"]
-READING_SERIAL = (args["serial"])
+READING_SERIAL = args["read_serial"]
 
 
 connect = conn.Connect()
@@ -50,7 +64,6 @@ TRACKER_ID = "TLO12017000971"  # TER'S TRACKER
 if TEST_BOOL:
     TRACKER_ID = "60000003"
 print(f"TRACKER ID: {TRACKER_ID}")
-SHAPE_PREDICTOR = "shape_predictor_68_face_landmarks.dat"
 IS_AUTH = False
 ear = 0
 CO = 0
@@ -61,6 +74,7 @@ DIRECTION = 0
 SPEED = 0
 PROGRAM_FINISHED = False
 print("Authenticate to server ...")
+import time
 while not IS_AUTH:
     try:
         # email = input("Enter email: ")
@@ -73,16 +87,16 @@ while not IS_AUTH:
             break
         else:
             print("Your email or password is incorrect")
-
+        time.sleep(1)
     except Exception as err:
         print(err)
-        #print("failed to authenticate to server....")
+        print("failed to authenticate to server....")
+        time.sleep(1)
 ACCTIME = connect.acctime  # ACCTIME
 UID = connect.uid  # USER ID
 PUSH_TOKEN = connect.expoPushToken
 server_socket = ss.ServerSokcet(uid=UID)
 print(f"UID:{UID},ACCTIME:{ACCTIME}")
-
 
 def updateGasData():
     global LPG, CO, SMOKE
@@ -104,7 +118,7 @@ def updateGasData():
                     proc = Process(target=connect.pushnotification, args=(
                         "Over CO", LATLNG, DIRECTION, SPEED))
                     proc.start()
-                    proc.join()
+                    #proc.join()
         except Exception as err:
             pass
 
@@ -130,42 +144,37 @@ FPS = 0
 # WIDTH = 240
 # HEIGHT = 140
 # USE HUAWEI IP CAM
-cap = cv2.VideoCapture(args["cam"])
+if args["cam"] >= 0 :
+    cap = cv2.VideoCapture(args["cam"])
+else:
+    cap = cv2.VideoCapture(os.path.join(current_dir,"test_vdo.mp4"))
 
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1280)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 720)
 print("[INFO] starting video stream thread...")
-resize_factor = 0.8
 while True:
     try:
 
         ret, frame = cap.read()
+        if ROTATE_IMAGE :
+            frame = cv2.rotate(frame,cv2.ROTATE_180) # rotate frame by 180 degree
         HEIGHT, WIDTH, _ = frame.shape
         # set quality of image
-        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
+        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]
         result, image = cv2.imencode(".jpg", frame, encode_param)
         img_as_text = base64.b64encode(image)
-        # cv2.imshow("frame",frame)
 	# Send data through socket
         server_socket.sendImage(
             jpg_text=img_as_text,
-#            coor=LATLNG, ear=ear,
             gas={
                 "co": CO,
                 "lpg": LPG,
                 "smoke": SMOKE
             },
-#            direction=DIRECTION,
-#            speed=SPEED,
-#            fps=AVG_FRAME,
-#            eye_close_time=EYES_CLOSED_TIME
         )
         TOTAL_FRAME +=1 
         sys.stdout.write("\rFrame {} sent...".format(TOTAL_FRAME))
         sys.stdout.flush()         
-        key = cv2.waitKey(1) & 0xff
-        if key == 27:
-            break
     except Exception as err:
         print(err)
         pass

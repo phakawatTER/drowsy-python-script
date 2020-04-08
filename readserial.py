@@ -10,7 +10,7 @@ import serial
 import re
 import pynmea2
 
-GAS_PORT = "/dev/ttyACM0"
+GAS_PORT = "/dev/ttyUSB0"
 GPS_PORT = "/dev/ttyACM1"
 
 class ReadSerial:
@@ -28,9 +28,13 @@ class ReadSerial:
         gas_data = gas_data.decode("utf8")
         gas_data = gas_data.split()
         all_gas = []
-        for gas in gas_data:
-            gas = self.stripGasData(gas)
-            all_gas.append(gas)
+        try:
+            for gas in gas_data:
+                gas = self.stripGasData(gas)
+                all_gas.append(float(gas))
+        except Exception as err:
+            print(err)
+            all_gas = [0,0,0]
         return all_gas
     
     def readGPS(self):
@@ -44,8 +48,5 @@ class ReadSerial:
                 
 if __name__ == "__main__":
     read = ReadSerial()
-    data = read.readGPS()
-    print(data)
-        
-    
-    
+    while True:
+        print(read.readGas())
