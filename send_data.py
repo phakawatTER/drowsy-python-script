@@ -1,3 +1,4 @@
+import datetime
 from scipy.spatial import distance as dist
 import sys
 import os
@@ -19,7 +20,10 @@ import struct
 import mappicosocket as ms
 import serversocket as ss
 import hashlib
+import lcddriver
 import base64
+
+display = lcddriver.lcd() # lcd display
 
 current_dir = os.path.dirname(__file__)
 def str2bool(v):
@@ -74,8 +78,10 @@ DIRECTION = 0
 SPEED = 0
 PROGRAM_FINISHED = False
 print("Authenticate to server ...")
+display.lcd_display_string("AUTHENTICATING",1)
 import time
-while not IS_AUTH:
+
+while not IS_AUTH: # keep authenticate until authentication is completed...
     try:
         # email = input("Enter email: ")
         # password = getpass("Enter password: ")
@@ -84,20 +90,23 @@ while not IS_AUTH:
         IS_AUTH = connect.authenticate(email, hashlib.sha512(
             bytes(f"{password}{SECRET}", encoding="utf-8")).hexdigest(),TRACKER_ID)
         if IS_AUTH:
+            display.lcd_display_string("AUTHENTICATION",2)
+            display.lcd_display_string("SUCCESSED!!!",2)
             break
         else:
             print("Your email or password is incorrect")
         time.sleep(1)
     except Exception as err:
-        print(err)
+        display.lcd_display_string("FAILED!!!",2)
         print("failed to authenticate to server....")
         time.sleep(1)
 ACCTIME = connect.acctime  # ACCTIME
 UID = connect.uid  # USER ID
-PUSH_TOKEN = connect.expoPushToken
-server_socket = ss.ServerSokcet(uid=UID)
+PUSH_TOKEN = connect.expoPushToken # expo push token for notification request
+server_socket = ss.ServerSokcet(uid=UID) # middle sever socket instance
 print(f"UID:{UID},ACCTIME:{ACCTIME}")
 
+# update gas data task => this will be run as new a process
 def updateGasData():
     global LPG, CO, SMOKE
     REQ_TIME = time.time()
@@ -118,17 +127,9 @@ def updateGasData():
                     proc = Process(target=connect.pushnotification, args=(
                         "Over CO", LATLNG, DIRECTION, SPEED))
                     proc.start()
-                    #proc.join()
         except Exception as err:
             pass
 
-
-COUNTER = 0
-TOTAL = 0
-# TIME WHEN EYES ARE CLOSED AND NEXR SECOND
-EYES_CLOSED_TIME = 0
-NEXT_SECOND = 0
-EYES_CLOSED_TIMER = 0
 
 # Read data from serial port if READ_SERIAL flag is set
 if READING_SERIAL:
@@ -136,26 +137,68 @@ if READING_SERIAL:
     GAS_THREAD = Thread(target=updateGasData)
     GAS_THREAD.start()
 
-START_TIME = time.time()
-PREV_TIME = 0
-TOTAL_FRAME = 0
-AVG_FRAME = 10
-FPS = 0
-# WIDTH = 240
-# HEIGHT = 140
-# USE HUAWEI IP CAM
-if args["cam"] >= 0 :
+TOTAL_FRAME = 0 # Number of frame sent...
+
+if args["cam"] >= 0 : 
     cap = cv2.VideoCapture(args["cam"])
 else:
     cap = cv2.VideoCapture(os.path.join(current_dir,"test_vdo.mp4"))
 
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1280)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 720)
+
+VDO_SHAPE = (1280,720)
+# Set shape of read video
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, VDO_SHAPE[0])
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, VDO_SHAPE[1])
 print("[INFO] starting video stream thread...")
+display.lcd_clear()
+display.lcd_display_string("START STREAMING",1)
+time.sleep(2.5) 
+display.lcd_display_string("WAITING FOR DATA",1)
+
+
+SHOW_ALERT_DURATION = 5 # duration to show alert on LCD screen
+START_ALERT_TIME = None
+trip_process_data = None # this will be updated by data received from server
+
+#def warn ():
+
+print("process_data_{}".format(UID))
+@server_socket.on("process_data_{}".format(UID))
+def on_data_recv(data):
+    print("PROCESSED DATA RECIEVED")
+    try:
+        CURRENT_TIME = datetime.datetime.now()
+        timediff = CURRENT_TIME - START_ALERT_TIME
+        should_write = timediff > SHOW_ALERT_DURATION
+    except:
+        should_write = True
+    if should_write:
+        mar = data["mar"] # Mouth Aspect Ratio
+        ear = data["ear"] # Ear Aspect Ration
+        gas = data["gas"] # co ,lpg,smoke in ppm unit
+        co = gas["co"]
+        line1 = "EAR:{0:.2f}MAR:{1:.2f}".format(ear,mar)
+        line2 = "CO:{0:.2f} ppm".format(co)
+        display.lcd_display_string(line1,1) # write screen line 1
+        display.lcd_display_string(line2,2) # write screen line 2
+
+
+#@server_socket.on("warn_driver_{}".format(uid)):
+#def on_warn_driver(data):
+#    START_ALERT_TIME = datetime.datetime.now()
+#    print(data)
+#    """
+#    TODO: Play alarm sound and display some icon on the screen
+#    """
+
+
+LOOP_DELAY = 0.06
+
+## Start Streaming Data to Server
 while True:
     try:
 
-        ret, frame = cap.read()
+        ret, frame = cap.read() # read image input
         if ROTATE_IMAGE :
             frame = cv2.rotate(frame,cv2.ROTATE_180) # rotate frame by 180 degree
         HEIGHT, WIDTH, _ = frame.shape
@@ -175,6 +218,7 @@ while True:
         TOTAL_FRAME +=1 
         sys.stdout.write("\rFrame {} sent...".format(TOTAL_FRAME))
         sys.stdout.flush()         
+        time.sleep(LOOP_DELAY)
     except Exception as err:
         print(err)
         pass
@@ -183,3 +227,9 @@ cap.release()
 cv2.destroyAllWindows()  # destroy all windows
 PROGRAM_FINISHED = True
 os._eixt(0)
+
+
+"""
+TODO: Play alarm sound on sleepiness or fatigue driving is detected 
+TODO: Recieve realtime  processing data from middle server 
+"""

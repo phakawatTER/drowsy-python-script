@@ -16,6 +16,11 @@ class ServerSokcet(socketio.Client):
         def connect():
             print("ter's server connected...")
             pass
+	
+#        @self.on("process_data_{}".format(uid))
+#        def on_data_recv(data):
+#            print("PROCESS DATA RECIEVED...")
+#            print(data)
 
         @self.on("image_{}".format(self.uid))
         def recv_image(data):
@@ -35,5 +40,9 @@ class ServerSokcet(socketio.Client):
 
 
 if __name__ == "__main__":
-    socket = ServerSokcet()
-    socket.sendImage(jpg_text="test",coor="test",eiei="989")
+    uid =  "-LrdlygY0H5IzMvDo-bh"
+    socket = ServerSokcet(uid=uid)
+#    @socket.on("process_data_{}".format(uid))
+#    def on_data_recv(data):
+#        print(data)
+    #socket.sendImage(jpg_text="test",coor="test",eiei="989")
