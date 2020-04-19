@@ -156,11 +156,9 @@ time.sleep(2.5)
 display.lcd_display_string("WAITING FOR DATA",1)
 
 
-SHOW_ALERT_DURATION = 5 # duration to show alert on LCD screen
+SHOW_ALERT_DURATION = 3 # duration to show alert on LCD screen
 START_ALERT_TIME = None
 trip_process_data = None # this will be updated by data received from server
-
-#def warn ():
 
 print("process_data_{}".format(UID))
 @server_socket.on("process_data_{}".format(UID))
@@ -183,51 +181,56 @@ def on_data_recv(data):
         display.lcd_display_string(line2,2) # write screen line 2
 
 
-#@server_socket.on("warn_driver_{}".format(uid)):
-#def on_warn_driver(data):
-#    START_ALERT_TIME = datetime.datetime.now()
-#    print(data)
-#    """
-#    TODO: Play alarm sound and display some icon on the screen
-#    """
-
+@server_socket.on("warn_driver_{}".format(UID))
+def on_warn_driver(data):
+    START_ALERT_TIME = datetime.datetime.now()
+    line1 = "WARNING !!!"
+    if event == "Dangerous Eye Close":
+        event = "Eye Close"
+    line2 = event
+    display.lcd_display_string(line1,1) # write screen line 1
+    display.lcd_display_string(line2,2) # write screen line 2
 
 LOOP_DELAY = 0.06
+try:
+    ## Start Streaming Data to Server
+    while True:
+        try:
 
-## Start Streaming Data to Server
-while True:
-    try:
+            ret, frame = cap.read() # read image input
+            if ROTATE_IMAGE :
+                frame = cv2.rotate(frame,cv2.ROTATE_180) # rotate frame by 180 degree
+            HEIGHT, WIDTH, _ = frame.shape
+            # set quality of image
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]
+            result, image = cv2.imencode(".jpg", frame, encode_param)
+            img_as_text = base64.b64encode(image)
+    	# Send data through socket
+            server_socket.sendImage(
+                jpg_text=img_as_text,
+                gas={
+                    "co": CO,
+                    "lpg": LPG,
+                    "smoke": SMOKE
+                },
+            )
+            TOTAL_FRAME +=1 
+            sys.stdout.write("\rFrame {} sent...".format(TOTAL_FRAME))
+            sys.stdout.flush()         
+            time.sleep(LOOP_DELAY)
+        except Exception as err:
+            print(err)
+            pass
 
-        ret, frame = cap.read() # read image input
-        if ROTATE_IMAGE :
-            frame = cv2.rotate(frame,cv2.ROTATE_180) # rotate frame by 180 degree
-        HEIGHT, WIDTH, _ = frame.shape
-        # set quality of image
-        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]
-        result, image = cv2.imencode(".jpg", frame, encode_param)
-        img_as_text = base64.b64encode(image)
-	# Send data through socket
-        server_socket.sendImage(
-            jpg_text=img_as_text,
-            gas={
-                "co": CO,
-                "lpg": LPG,
-                "smoke": SMOKE
-            },
-        )
-        TOTAL_FRAME +=1 
-        sys.stdout.write("\rFrame {} sent...".format(TOTAL_FRAME))
-        sys.stdout.flush()         
-        time.sleep(LOOP_DELAY)
-    except Exception as err:
-        print(err)
-        pass
-
-cap.release()
-cv2.destroyAllWindows()  # destroy all windows
-PROGRAM_FINISHED = True
-os._eixt(0)
-
+    cap.release()
+    cv2.destroyAllWindows()  # destroy all windows
+    PROGRAM_FINISHED = True
+    os._eixt(0)
+except KeyboardInterrupt: 
+    print("PROGRAM FINISHED...")
+    import Jetson.GPIO as GPIO
+    GPIO.cleanup() # clear I/O pins
+    display.lcd_clear() # clear screen
 
 """
 TODO: Play alarm sound on sleepiness or fatigue driving is detected 
