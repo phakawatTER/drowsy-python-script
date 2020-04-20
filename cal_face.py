@@ -4,8 +4,8 @@ import time
 from scipy.spatial.distance import euclidean
 
 class cal_face():
-    eyes_close_threshold = 0.22
-    mouth_open_threshold = 0.35
+    eyes_close_threshold = 0.25
+    mouth_open_threshold = 0.28
     yawning_time_threshold = 2.5
     dangerous_eye_close_time = 2.5
     def __init__(self):
@@ -65,15 +65,16 @@ class cal_face():
         stop_time = self.ear_log.values[self.ear_log.values.shape[0]-1][0] - duration
         ear_result = self.ear_log[self.ear_log.timestamp >= stop_time]
         mean_ear =  np.mean(ear_result,axis=0)[1]
-        eye_close = mean_ear < cal_face.eyes_close_threshold
+        eye_close = mean_ear <= 0.30
         # mar
         stop_time = self.mar_log.values[self.mar_log.values.shape[0]-1][0] - duration
         mar_result = self.mar_log[self.mar_log.timestamp >= stop_time]
         mean_mar = np.mean(mar_result,axis=0)[1]
-        mouth_is_open = mean_mar < cal_face.mouth_open_threshold
+        mouth_is_open = mean_mar >= cal_face.mouth_open_threshold
         yawn = False
         if eye_close and mouth_is_open:
-            yawn = True
+#        if mouth_is_open: 
+           yawn = True
         return (yawn,mean_ear,mean_mar)
 
     def check_eye(self,duration=1.0):

@@ -16,17 +16,18 @@ import threading
 from middlesocket import MiddleServerSocket
 from ddestimator import ddestimator
 import sys
-import multiprocessing as mp
+from multiprocessing import Process
+from threading import Thread
 import mappicosocket as ms
 import schedule
 import base64
-from threading import Thread
 import math
 import os
 import pickle
 import json
 from cal_face import cal_face
-
+from camera_api import API_MIDDLE_SERVER_DOWNLOAD_VDO
+import requests
 
 # Keras uses Tensorflow Backend
 config = tf.compat.v1.ConfigProto()
@@ -36,24 +37,29 @@ set_session(sess) # set session for keras backend
 
 current_directory = os.path.dirname(__file__)
 root_directory = "/home/phakawat/"
+local_endpoint = "http://localhost:4000"
 
-#INPUT_SHAPE = 256
 INPUT_SHAPE = 128
+TEST_VDO = os.path.join(root_directory,"test_vdo_night.mp4")
+print(TEST_VDO)
+VIDEO_SHAPE = (720,480) 
+
 class ProcessImage(socketio.Client):
     DNN_MODEL_FILE = os.path.join(
         current_directory, "opencv_face_detector_uint8.pb")
     DNN_MODEL_CONFIG = os.path.join(
         current_directory, "opencv_face_detector.pbtxt")
 
-
-    EYECLOSE_THRESHOLD = 0.26
+    EYECLOSE_THRESHOLD = 0.22
     REQUEST_INTERVAL = 5 # seconds
     GAZE_REQUEST_TIME = None
     EYECLOSE_REQUEST_TIME = None
     FATIGUE_REQUEST_TIME = None
 
-    def __init__(self, ip="http://localhost:4000",tracker_id="", uid="", acctime="", token="",pushtoken="",test=False,test_vdo_path=""):
+    def __init__(self, ip=local_endpoint,tracker_id="", uid="", acctime="", token="",pushtoken="",test=False,test_vdo_path=TEST_VDO,use_request=True,use_vdo=True):
         socketio.Client.__init__(self)
+        self.use_vdo = use_vdo 
+        self.use_request = use_request
         self.TEST_MODE = test 
         self.face_check = False
         self.face_known = False
@@ -67,7 +73,8 @@ class ProcessImage(socketio.Client):
         self.START_TIME = time.time() # use for determining duration of the trip
         self.AVG_EAR = 0.35 # initial value for eye aspect ratio
         self.MAR = 0.1 # initial value for mouth aspect ratio
-        if self.TEST_MODE : # if test mode is enabled
+        if self.TEST_MODE or self.use_vdo: # if test mode is enabled
+            print("LOADING ---> ",test_vdo_path)
             self.cap = cv2.VideoCapture(test_vdo_path)
         self.api_connect = conn.Connect( 
             token=token, uid=uid, acctime=acctime, expoPushToken=pushtoken)
@@ -87,14 +94,15 @@ class ProcessImage(socketio.Client):
        # create directory if it's not exist
         if not os.path.exists(os.path.join(root_directory, "trip_vdo", self.uid)):
             os.makedirs(os.path.join(root_directory, "trip_vdo", self.uid))
-        self.vdo_writer = cv2.VideoWriter(os.path.join(root_directory, "trip_vdo", self.uid, "{}.avi".format(
-            acctime)), cv2.VideoWriter_fourcc(*'DIVX'), 10, (1280, 720))
+        self.vdo_writer = cv2.VideoWriter(os.path.join(root_directory, "trip_vdo", self.uid, "{}.mp4".format(
+            acctime)), cv2.VideoWriter_fourcc(*'MP4V'),10,VIDEO_SHAPE)
         # SCHEDULER JOBS...
         # schedule to check if data is recieved
         # if data is not recieved anymore so proceed to terminate the process
         schedule.every(15).seconds.do(self.checkIfAlive)
         if not self.TEST_MODE: # update trip data to database if not test mode
             schedule.every(2).seconds.do(self.update_obd_data)
+        schedule.every(2).seconds.do(self.send_processed_data)
 
         @self.event
         def connect():
@@ -118,10 +126,9 @@ class ProcessImage(socketio.Client):
         self.connect(ip) # connect to local server socket
         self.middle_server_socket = MiddleServerSocket() # connect to  middle server socket
         self.mpc_socket = ms.MappicoSocket(
-            tracker_id, self.trip_data, connect=self.connect, uid=uid, acctime=acctime, pushToken=pushtoken) # connect to mappico socket
+            tracker_id, self.trip_data, connect=self.api_connect, uid=uid, acctime=acctime, pushToken=pushtoken) # connect to mappico socket
 
-    def  update_obd_data(self):
-        print("updating")
+    def update_obd_data(self):
         try:
             print(self.trip_data["gas"])
             coor = self.trip_data["coor"]
@@ -129,23 +136,35 @@ class ProcessImage(socketio.Client):
             co = self.trip_data["gas"]["co"]
             speed = self.trip_data["speed"]
             data = {"acctime":self.acctime,"uid":self.uid,"latlng":coor,"speed":speed,"co":co,"direction":direction}
-            print(data)
             self.emit("obd_update_data",data) # emit data to local server
         except Exception as err:
             print(err)
             pass
 
+    def warn_driver(self,event):
+        print("emit warn driver")
+        data = {"uid":self.uid,"event":event}
+        self.emit("warn_driver",data)
+
+    def send_processed_data(self):
+        print("emit processed data")
+        try:
+            if self.prev_val != self.current_val or self.TEST_MODE:
+                data = self.trip_data.copy()
+                data["uid"] = self.uid # add uid into data
+                del data["jpg_text"] # delete jpg
+                print([key for key in data]) # print dictionary key
+                self.emit("process_data",data)
+        except Exception as err:
+            print(err)
     def load_landmark_model(self,path):
         self.landmark_model = load_model(path)
 
     def predict_face_landmark(self,face,show_exec_time=False):
-        #face = cv2.cvtColor(face,cv2.COLOR_BGR2GRAY)
         start = time.time()
         me = np.array(face)/255
         h,w,c = me.shape
         me = me.reshape((1,h,w,c))
-        #x_test = np.expand_dims(me, axis=0)
-        #x_test = np.expand_dims(x_test, axis=3)
         y_test = self.landmark_model.predict(me)
         label_points = (np.squeeze(y_test))
         stop = time.time()
@@ -166,6 +185,9 @@ class ProcessImage(socketio.Client):
         self.disconnect()
         cv2.destroyAllWindows()
         self.vdo_writer.release()
+        print("Successfully save trip vdo file as mp4...")
+        request_middleserver_download = requests.post(url=API_MIDDLE_SERVER_DOWNLOAD_VDO,data={"uid":self.uid,"file":"{}.mp4".format(self.acctime)})
+        print(request_middleserver_download.text)
         os._exit(0)
 
     def draw_face(self,frame,face_shape,origin,key_points):
@@ -213,9 +235,9 @@ class ProcessImage(socketio.Client):
         euler, rotation, translation = self.ddestimator.est_head_dir(coords)
         _, _, gaze_D = self.ddestimator.est_gaze_dir(coords)
         bc_2d_coords = self.ddestimator.proj_head_bounding_cube_coords(rotation, translation)
-        #gl_2d_coords = self.ddestimator.proj_gaze_line_coords(
-        #     rotation, translation, gaze_D)
-        #frame = self.ddestimator.draw_gaze_line(frame, gl_2d_coords, (0, 255, 0), gaze_D)
+        gl_2d_coords = self.ddestimator.proj_gaze_line_coords(
+             rotation, translation, gaze_D)
+        frame = self.ddestimator.draw_gaze_line(frame, gl_2d_coords, (0, 255, 0), gaze_D)
         frame = self.ddestimator.draw_bounding_cube(frame, bc_2d_coords, (255, 0, 0), euler)
         return frame
 
@@ -252,77 +274,16 @@ class ProcessImage(socketio.Client):
                 mar = self.cal_face.cal_mar_98(coords)
 
                 #  check facial status 
-                yawn = self.cal_face.check_yawn(duration=6) # check if user is yawning ...
+                yawn = self.cal_face.check_yawn(duration=3) # check if user is yawning ...
                 is_yawning,_,_= yawn
                 eye_close ,eye_close_ot = self.cal_face.check_eye(duration=1)
-                print(f"FACIAL LOG YAWN_STATUS:{yawn} EYE_CLOSE:{eye_close} EAR:{avg_ear} MAR:{mar}")
+#                sys.stdout.write(f"\rFACIAL LOG YAWN_STATUS:{yawn} EYE_CLOSE:{eye_close} EAR:{avg_ear} MAR:{mar}")
+                sys.stdout.flush()
+
                 # get facial log to determi
                 ear_log = self.cal_face.get_log(self.cal_face.ear_log,period=2) # check back 5 seconds for ear log
                 mar_log = self.cal_face.get_log(self.cal_face.mar_log,period=3) # check back 5seconds for mar log
 
-                # EYES WARNING
-                if eye_close_ot  <  ProcessImage.EYECLOSE_THRESHOLD :
-                    now = datetime.datetime.now()
-                    event = "Dangerous Eye Close"
-                    latlng = self.trip_data["coor"]
-                    speed = self.trip_data["speed"]
-                    uid = self.uid
-                    acctime = self.acctime
-                    pushToken = self.pushtoken
-                    try:
-                        timediff = now - ProcessImage.EYECLOSE_REQUEST_TIME
-                        second_diff = timediff.seconds
-                        if second_diff >= ProcessImage.REQUEST_INTERVAL:
-                            ProcessImage.EYECLOSE_REQUEST_TIME = now # update latest request time
-                            print("Requesting for notification event:{}".format(event))
-            #def pushnotification(self, event, latlng, direction, speed, uid=None, acctime=None, pushToken=None):  
-                          #make request for mobile notification
-                            try:
-                                request_proc = mp.Process(target=self.api_connect.pushnotification,args=(event,latlng,speed,uid,acctime,pushToken))
-                                request_proc.start() # start request process
-                            except:
-                                pass
-                    except:
-                        ProcessImage.EYECLOSE_REQUEST_TIME = datetime.datetime.now()
-                        try:
-                        # make request for mobile notification
-                            request_proc = mp.Process(target=self.api_connect.pushnotification,args=(event,latlng,speed,uid,acctime,pushToken))
-                            request_proc.start() # start request process
-                        except:
-                            pass
-
-
-                # FATIGUE WARNING  ---> Let  Yawning == Fatigue
-                if is_yawning:
-                    now = datetime.datetime.now()
-                    event = "Fatigue"
-                    latlng = self.trip_data["coor"]
-                    speed = self.trip_data["speed"]
-                    uid = self.uid
-                    acctime = self.acctime
-                    pushToken = self.pushtoke
-                    try:
-                        timediff = now - ProcessImage.FATIGUE_REQUEST_TIME
-                        second_diff = timediff.seconds
-                        if second_diff >= ProcessImage.REQUEST_INTERVAL:
-                            ProcessImage.FATIGUE_REQUEST_TIME = now
-                            try:
-                                request_proc = mp.Process(target=self.api_connect.pushnotification,args=(event,latlng,speed,uid,acctime,pushToken))
-                                request_proc.start() # start request process
-                            except:
-                                pass
-                    except:
-                        ProcessImage.FATIGUE_REQUEST_TIME =  now
-                        try:
-                            request_proc = mp.Process(target=self.api_connect.pushnotification,args=(event,latlng,speed,uid,acctime,pushToken))
-                            request_proc.start() # start request proces
-                        except:
-                            pass
-
-
-
-
-#                self.cal_face.store_gaze_dir(direction) # store face gaze direction
                 # check if ear avg ear over time
                 ear_ot = np.mean(ear_log.values,axis=0)[1]
 #                print("eye aspect ratio (over time):{}".format(ear_ot))
@@ -340,6 +301,51 @@ class ProcessImage(socketio.Client):
                 frame = self.draw_bounding_box(frame,coords)
                 # draw facail landmark points
                 frame = self.draw_face(frame,(int(x2-x1),int(y2-y1)),(x1,y1),key_points)
+                
+                # EYES WARNING
+                if eye_close_ot  <  ProcessImage.EYECLOSE_THRESHOLD :
+                    event = "Dangerous Eye Close"
+                    latlng = self.trip_data["coor"]
+                    speed = self.trip_data["speed"]
+                    direction = self.trip_data["direction"]
+                    if ProcessImage.EYECLOSE_REQUEST_TIME == None:
+                        ProcessImage.EYECLOSE_REQUEST_TIME = datetime.datetime.now()
+                    now = datetime.datetime.now()
+                    timediff = now - ProcessImage.EYECLOSE_REQUEST_TIME
+                    second_diff = timediff.seconds
+                    if second_diff >= ProcessImage.REQUEST_INTERVAL:
+                        self.warn_driver(event)
+                        ProcessImage.EYECLOSE_REQUEST_TIME = now # update latest request time
+                        print("Requesting for notification event:{} , time difference:{}".format(event,second_diff))
+                        #make request for mobile notification
+                        if self.use_request:  # request if use_request flag is set
+                            request_thread = Thread(target=self.api_connect.pushnotification,args=(event,latlng,direction,speed),
+                                kwargs={"uid":self.uid,"acctime":self.acctime,"pushToken":self.pushtoken})
+                            request_thread.start() # start request process
+
+                # FATIGUE WARNING
+                if is_yawning:
+                    event = "Fatigue"
+                    latlng = self.trip_data["coor"]
+                    speed = self.trip_data["speed"]
+                    direction = self.trip_data["direction"]
+                    if ProcessImage.FATIGUE_REQUEST_TIME == None:
+                        ProcessImage.FATIGUE_REQUEST_TIME = datetime.datetime.now()
+                    now = datetime.datetime.now()
+                    timediff = now - ProcessImage.FATIGUE_REQUEST_TIME
+                    second_diff = timediff.seconds
+                    if second_diff >= ProcessImage.REQUEST_INTERVAL:
+                        self.warn_driver(event)
+                        ProcessImage.FATIGUE_REQUEST_TIME = now # update latest request time
+                        print("Requesting for notification event:{} , time difference:{}".format(event,second_diff))
+                        #make request for mobile notification
+                        if self.use_request: # request if use_request flag is set
+                            request_thread = Thread(target=self.api_connect.pushnotification,args=(event,latlng,direction,speed),
+                                kwargs={"uid":self.uid,"acctime":self.acctime,"pushToken":self.pushtoken})
+                            request_thread.start() # start request process
+        
+
+            # END IF FACE FOUND
         return (face_found, frame)
 
 
@@ -384,21 +390,27 @@ class ProcessImage(socketio.Client):
         while True:
             try:
                 schedule.run_pending()  # keep running pending scheduler.
-                if not self.TEST_MODE:
-                    frame = self.img_data
-                    #frame = cv2.rotate(frame,cv2.ROTATE_180)
+                if not self.TEST_MODE and not self.use_vdo:
+                    if self.prev_val ==  self.current_val:
+                        print("Freeze....Waiting for new frame")
+                        continue
+                    frame = self.img_data.copy() # copy frame 
+                    #if self.prev_frame == None:
+                     #   self.prev_frame = self.img_data.copy()
                 else:
                     ret,frame = self.cap.read()
                     if not ret: # if video finsihed  then break the loop
                         break
+
                 process_frame = self.apply_clahe(frame)
                 process_frame = self.adjust_gamma(process_frame)
                 # process_frame = self.apply_sharpen(process_frame)
                 HEIGHT, WIDTH, _ = frame.shape
                 # END CHECKING KNOWN FACE BLOCK
                 _, process_frame = self.process_img(frame,process_frame)
-                self.vdo_writer.write(frame) # capture frame as video
-                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 35]
+                written_frame = cv2.resize(frame,VIDEO_SHAPE,interpolation=cv2.INTER_AREA) # resize frame for vdo file
+                self.vdo_writer.write(written_frame) # capture frame as video
+                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY),75]
                 _, image = cv2.imencode(".jpg", frame, encode_param)
                 img_as_text = base64.b64encode(image)
                 self.trip_data["ear"] = self.AVG_EAR # eye aspect ratio
@@ -407,14 +419,23 @@ class ProcessImage(socketio.Client):
                 self.middle_server_socket.emit("livestream",self.trip_data)
 
             except Exception as err:
-                print(err)
-                pass
+                print("Exception:----> ",err,"image_{}".format(self.uid))
 
         self.program_finish()
 
     # END FUNCTION "run"
 
 if __name__ == "__main__":
+    def str2bool(v):
+        v = v.lower()
+        if isinstance(v, bool):
+            return v
+        if v.lower() in ('yes', 'true', 't', 'y', '1'):
+            return True
+        elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+            return False
+        else:
+            raise argparse.ArgumentTypeError('Boolean value expected.')
     ap = argparse.ArgumentParser()
     ap.add_argument("-u", "--userid", required=True, help="Enter user id")
     ap.add_argument("-a", "--acctime", required=True, help="Enter trip acctime")
@@ -425,12 +446,14 @@ if __name__ == "__main__":
             help="Enter tracker id")
     ap.add_argument("--landmark-model", required=True, type=str,
         help="Path to landmark predictor model")
-    ap.add_argument("--test",default=False,required=False, type=bool,
+    ap.add_argument("--test",default=False,required=False, type=str2bool,
         help="Enable test mode")
-    ap.add_argument("-vdo","--vdo-path",required=False,help="Path to test VDO file")
+    ap.add_argument("-vdo","--vdo-path",default=TEST_VDO,required=False,help="Path to test VDO file")
+    ap.add_argument("--use-request",required=False,default=True,help="Request notification if event occur" , type=str2bool)
+    ap.add_argument("--use-vdo",required=False,default=True,help="Request notification if event occur" , type=str2bool)
     args = vars(ap.parse_args())
     args["userid"] = args["userid"].replace(" ", "", 1)
-    process_image = ProcessImage(tracker_id=args["tracker_id"], uid=args["userid"], acctime=args["acctime"], token=args["token"], pushtoken=args["pushtoken"] ,test=args["test"],test_vdo_path=args["vdo_path"] ) # CREATE OBJECT
+    process_image = ProcessImage(tracker_id=args["tracker_id"], uid=args["userid"], acctime=args["acctime"], token=args["token"], pushtoken=args["pushtoken"] ,test=args["test"],test_vdo_path=args["vdo_path"],use_request=args["use_request"],use_vdo=args["use_vdo"]) # CREATE OBJECT
     process_image.load_landmark_model(args["landmark_model"]) # LOAD LANDMARK MODEL
     process_image.run() # RUN PROCESSING IMAGE PROCESS
 

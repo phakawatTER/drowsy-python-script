@@ -20,7 +20,6 @@ class MappicoSocket:
 
         @self.sio.on("obd_updated")
         def trip_updated(data):
-            print(data)
             if data["id"] == self.TRACKER_ID:
                 lat = data["lat"]
                 lon = data["lon"]
@@ -41,6 +40,7 @@ class MappicoSocket:
             direction = data["direction"]
             speed = data["speed"]
             if connect != None:
+                return
                 self.connect.pushnotification(
                     eventname, latlng, direction, speed, uid=self.uid, acctime=self.acctime)
 
