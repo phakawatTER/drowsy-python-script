@@ -23,15 +23,16 @@ import serversocket as ss
 import hashlib
 import lcddriver
 import base64
+from str2bool import str2bool
+
 
 display = lcddriver.lcd() # lcd display
 beep  = pb.beep(interval=4.0,beep_duration=0.5) # beep object
-display.lcd_clear()
-display.lcd_display_string("")
-
+display.lcd_clear() # initially clean lcd
 
 current_dir = os.path.dirname(__file__)
-def str2bool(v):
+
+def str2bool(v): # parse string to boolean 
     v = v.lower()
     if isinstance(v, bool):
         return v
@@ -41,7 +42,6 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
-
 
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
@@ -82,7 +82,7 @@ LATLNG = (0, 0)
 DIRECTION = 0
 SPEED = 0
 PROGRAM_FINISHED = False
-print("Authenticate to server ...")
+print("Authenticating to server ...")
 display.lcd_display_string("AUTHENTICATING",1)
 import time
 
@@ -96,8 +96,9 @@ while not IS_AUTH: # keep authenticate until authentication is completed...
             bytes(f"{password}{SECRET}", encoding="utf-8")).hexdigest(),TRACKER_ID)
         if IS_AUTH:
             display.lcd_clear()
-            display.lcd_display_string("AUTHENTICATION",2)
+            display.lcd_display_string("AUTHENTICATION",1)
             display.lcd_display_string("SUCCESSED!!!",2)
+            time.sleep(1.5)
             break
         else:
             print("Your email or password is incorrect")
@@ -115,12 +116,21 @@ print(f"UID:{UID},ACCTIME:{ACCTIME}")
 
 display.lcd_clear()
 display.lcd_display_string("WELCOME BACK",1)
-dispaly.lcd_display_string("PHAKAWAT!",2)
-
+display.lcd_display_string("PHAKAWAT!",2)
+time.sleep(1.5)
 # update gas data task => this will be run as new a process
 def updateGasData():
     global LPG, CO, SMOKE
     REQ_TIME = time.time()
+    def warn_driver():
+        line1 = "WARNING !!!"
+        event = "OVER CO"
+        line2 = event
+        display.lcd_clear()
+        display.lcd_display_string(line1,1) # write screen line 1
+        display.lcd_display_string(line2,2) # write screen line 2
+        beep.play_beep_loop()
+
     while not PROGRAM_FINISHED:
         try:
             GAS_DATA = rs.readGas()
@@ -135,16 +145,17 @@ def updateGasData():
                 TIME_DIFF = int(CURRENT_TIME - REQ_TIME)
                 if int(TIME_DIFF) >= 5:
                     REQ_TIME = time.time()  # UPDATE REQTIME
+                    warn = Thread(target=warn_driver)
+                    warn.start()
                     proc = Process(target=connect.pushnotification, args=(
                         "Over CO", LATLNG, DIRECTION, SPEED))
                     proc.start()
         except Exception as err:
             pass
-
+        time.sleep(2) # check gas every 2 seconds
 
 # Read data from serial port if READ_SERIAL flag is set
 if READING_SERIAL:
-    print("START UPDATE_GAS THREAD...")
     GAS_THREAD = Thread(target=updateGasData)
     GAS_THREAD.start()
 
@@ -163,8 +174,10 @@ cap.set(cv2.CAP_PROP_FRAME_WIDTH, VDO_SHAPE[1])
 print("[INFO] starting video stream thread...")
 display.lcd_clear()
 display.lcd_display_string("START STREAMING",1)
-time.sleep(2.5) 
-display.lcd_display_string("WAITING FOR DATA",1)
+time.sleep(2)
+display.lcd_clear()
+display.lcd_display_string("WAITING FOR ",1)
+display.lcd_display_string("SERVER RESPONSE",2)
 
 
 SHOW_ALERT_DURATION = 3 # duration to show alert on LCD screen
@@ -177,8 +190,8 @@ def on_data_recv(data):
     try:
         CURRENT_TIME = datetime.datetime.now()
         timediff = CURRENT_TIME - START_ALERT_TIME
-        should_write = timediff > SHOW_ALERT_DURATION
-    except:
+        should_write = timediff.total_seconds() > SHOW_ALERT_DURATION # timediff in seconds compared with alert duration 
+    except Exception as err:
         should_write = True
     if should_write:
         mar = data["mar"] # Mouth Aspect Ratio
@@ -191,9 +204,9 @@ def on_data_recv(data):
         display.lcd_display_string(line1,1) # write screen line 1
         display.lcd_display_string(line2,2) # write screen line 2
 
-
 @server_socket.on("warn_driver_{}".format(UID))
 def on_warn_driver(data):
+    global START_ALERT_TIME
     START_ALERT_TIME = datetime.datetime.now()
     line1 = "WARNING !!!"
     event = data["event"] # occured event!

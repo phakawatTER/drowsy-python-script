@@ -27,10 +27,9 @@ class beep:
                 self.beep()
             except KeyboardInterrupt:
                 print("Keyboard Interrupt Raised!")
-                GPIO.cleanup()
                 break
-        GPIO.cleanup()
 
 if __name__ == "__main__":
-    b = beep(interval=20,beep_duration=0.10)
+    b = beep(interval=20,beep_duration=0.50)
     b.play_beep_loop()
+    GPIO.cleanup()
