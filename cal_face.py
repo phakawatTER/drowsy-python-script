@@ -42,7 +42,7 @@ class cal_face():
         df = pd.DataFrame({"timestamp":[int(time.time()-self.start_time)],"mar":[MAR]})
         self.mar_log = self.mar_log.append(df,ignore_index=True)
         return MAR
-    
+
     # store direction
     def store_gaze_dir(self,direction):
         df = pd.DataFrame({"timestamp":[int(time.time()-self.start_time)],"gaze_dir":[direction]})
@@ -56,7 +56,7 @@ class cal_face():
     def check_distraction(self,duration=2.5):
         stop_time = self.gaze_dir_log.values[self.gaze_dir_log.values.shape[0]-1][0] - duration
         gaze_dir_result =  self.gaze_dir_log[self.gaze_dir_log.timestamp >= stop_time]
-        mean_gd = np.mean(gaze_dir,axis=0)[1] # Calculate average gaze direction during the duration
+        mean_gd = np.mean(gaze_dir_result,axis=0)[1] # Calculate average gaze direction during the duration
         return mean_gd
 
     def check_yawn(self,duration=2.5):

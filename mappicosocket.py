@@ -52,12 +52,7 @@ class MappicoSocket:
         self.sio.emit("room", "MAPPICO")
         # self.sio.wait()
     def connect_socket(self):
-        while True:
-            try:
-                self.sio.connect("https://iwapp.mappico.co.th")
-                break
-            except Exception as err:
-                print(err)
+        self.sio.connect("https://iwapp.mappico.co.th")
 
 if __name__ == "__main__":
     import argparse

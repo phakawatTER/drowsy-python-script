@@ -41,7 +41,6 @@ local_endpoint = "http://localhost:4000"
 
 INPUT_SHAPE = 128
 TEST_VDO = os.path.join(root_directory,"test_vdo_night.mp4")
-print(TEST_VDO)
 VIDEO_SHAPE = (720,480) 
 
 class ProcessImage(socketio.Client):
@@ -49,8 +48,9 @@ class ProcessImage(socketio.Client):
         current_directory, "opencv_face_detector_uint8.pb")
     DNN_MODEL_CONFIG = os.path.join(
         current_directory, "opencv_face_detector.pbtxt")
-
-    EYECLOSE_THRESHOLD = 0.22
+    EYE_CLOSE_DURATION_THRESHOLD = 2.5
+    EYECLOSE_THRESHOLD = 0.23
+    GAZE_THRESHOLD = 0.75 #  Threshold for gaze overtime
     REQUEST_INTERVAL = 5 # seconds
     GAZE_REQUEST_TIME = None
     EYECLOSE_REQUEST_TIME = None
@@ -123,10 +123,37 @@ class ProcessImage(socketio.Client):
         def disconnect():
             print("Disconnected from server...")
 
-        self.connect(ip) # connect to local server socket
-        self.middle_server_socket = MiddleServerSocket() # connect to  middle server socket
-        self.mpc_socket = ms.MappicoSocket(
-            tracker_id, self.trip_data, connect=self.api_connect, uid=uid, acctime=acctime, pushToken=pushtoken) # connect to mappico socket
+
+        # SOCKET CONNECTION
+        # 5 ATTEMPS EACH
+        print("CONNECTING SOCKET...")
+        for i in range(5):
+            try: # try to connect
+                self.connect(ip) # connect to local server socket
+            except socketio.exceptions.ConnectionError as err:
+                print("LOCAL SOCKET",err)
+                continue
+            print("LOCAL SOCKET CONNECT SUCCESSFULLY")
+            break
+        for i in range(5):
+            try: # try to connect
+                self.middle_server_socket = MiddleServerSocket() # connect to  middle server socket
+            except socketio.exceptions.ConnectionError as err:
+                print("MIDDLE SERVER SOCKET",err)
+                continue
+            print("MIDDLE SERVER SOCKET CONNECT SUCCESSFULLY")
+            break
+
+        for i in range(5):
+            try: # try to connect
+                self.mpc_socket = ms.MappicoSocket(
+                    tracker_id, self.trip_data, connect=self.api_connect, uid=uid, acctime=acctime, pushToken=pushtoken) # connect to mappico socket
+            except socketio.exceptions.ConnectionError as err:
+                print("MAPPICO SOCKET",err)
+                time.sleep(1)
+                continue
+            print("MAPPICO SOCKET CONNECT SUCCESSFULLY")
+            break
 
     def update_obd_data(self):
         try:
@@ -147,13 +174,12 @@ class ProcessImage(socketio.Client):
         self.emit("warn_driver",data)
 
     def send_processed_data(self):
-        print("emit processed data")
         try:
             if self.prev_val != self.current_val or self.TEST_MODE:
                 data = self.trip_data.copy()
                 data["uid"] = self.uid # add uid into data
                 del data["jpg_text"] # delete jpg
-                print([key for key in data]) # print dictionary key
+                #print([key for key in data]) # print dictionary key
                 self.emit("process_data",data)
         except Exception as err:
             print(err)
@@ -182,13 +208,20 @@ class ProcessImage(socketio.Client):
 
     def program_finish(self):
         print("Program finished...")
-        self.disconnect()
-        cv2.destroyAllWindows()
         self.vdo_writer.release()
         print("Successfully save trip vdo file as mp4...")
-        request_middleserver_download = requests.post(url=API_MIDDLE_SERVER_DOWNLOAD_VDO,data={"uid":self.uid,"file":"{}.mp4".format(self.acctime)})
-        print(request_middleserver_download.text)
-        os._exit(0)
+        if not self.TEST_MODE: # only inform user a new vdo only when  it is not a test mode
+            try:
+                request_middleserver_download = requests.post(url=API_MIDDLE_SERVER_DOWNLOAD_VDO,data={"uid":self.uid,"file":"{}.mp4".format(self.acctime)})
+#                data = {"uid":self.uid,"vdo_file":"{}.mp4".format(self.acctime)} # pack data
+#                self.middle_server_socket.emit("new_vdo",data) # send data to middle server
+            except Exception as err:
+                print(err)
+                pass
+        self.disconnect()
+        cv2.destroyAllWindows()
+        os._exit(0) # terminate program
+
 
     def draw_face(self,frame,face_shape,origin,key_points):
         x_points = key_points[::2]
@@ -202,6 +235,7 @@ class ProcessImage(socketio.Client):
         y_points = np.array(y_points)*scale_y+y1
         y_points = y_points.astype(int)
         coords = list(zip(x_points, y_points))
+        # draw points
         for i, coord in enumerate(coords, start=0):
             x, y = coord
             COLOR = (255, 133, 71)
@@ -237,9 +271,81 @@ class ProcessImage(socketio.Client):
         bc_2d_coords = self.ddestimator.proj_head_bounding_cube_coords(rotation, translation)
         gl_2d_coords = self.ddestimator.proj_gaze_line_coords(
              rotation, translation, gaze_D)
-        frame = self.ddestimator.draw_gaze_line(frame, gl_2d_coords, (0, 255, 0), gaze_D)
+        #frame = self.ddestimator.draw_gaze_line(frame, gl_2d_coords, (0, 255, 0), gaze_D)
+        self.ddestimator.bc_2d_coords = bc_2d_coords
+        self.ddestimator.euler = euler
         frame = self.ddestimator.draw_bounding_cube(frame, bc_2d_coords, (255, 0, 0), euler)
         return frame
+
+    def draw_head_pose(self,frame,coords):
+        euler = self.ddestimator.euler
+        bc_2d_coords = self.ddestimator.bc_2d_coords.reshape(8,2)
+        center_x = sum([c[0] for c in bc_2d_coords])/len(bc_2d_coords);center_x=int(center_x)
+        center_y = sum([c[1] for c in bc_2d_coords])/len(bc_2d_coords);center_y=int(center_y)
+        center = (center_x,center_y)
+        #cv2.circle(frame,center,2,(255,0,0),2)
+        front_x = []
+        front_y = []
+       # front square
+        for i in [0,3,4,7]:
+            front_x.append(bc_2d_coords[i][0])
+            front_y.append(bc_2d_coords[i][1])
+            coord = tuple(bc_2d_coords[i])
+            cv2.circle(frame, coord, 1,(0,255,0), 2)
+
+        back_x = []
+        back_y = []
+        # back square
+        for i in [1,2,5,6]:
+            back_x.append(bc_2d_coords[i][0])
+            back_y.append(bc_2d_coords[i][1])
+            coord = tuple(bc_2d_coords[i])
+            cv2.circle(frame, coord, 1,(0,0,255), 2)
+
+
+        #bottom squre
+        bottom_coords= np.array([coord for index,coord in enumerate(bc_2d_coords) if index in [2,3,6,7]])
+        bottom_center =tuple(np.average(bottom_coords , axis=0))
+        #cv2.arrowedLine(frame,center,bottom_center,(255,0,0),1) # draw arrowed line for YAW
+
+        #right square
+        right_coords= np.array([coord for index,coord in enumerate(bc_2d_coords) if index in [4,5,6,7]])
+        right_center = tuple(np.average(right_coords , axis=0))
+        #cv2.arrowedLine(frame,center,right_center,(0,0,255),1) # draw arrowed line for PITCH
+
+        front_box_coords=zip(front_x,front_y)
+        back_box_coords=zip(back_x,back_y)
+        offset = 20
+        front_center_x = sum(front_x)/len(front_x);front_center_x = int(front_center_x)
+        front_center_y = sum(front_y)/len(front_y);front_center_y = int(front_center_y)
+        front_center  = (front_center_x,front_center_y)
+
+        distance = ((front_center_x - center_x)**2 + (front_center_y -center_y)**2)**0.5
+        outer_distance = int(distance + 0.5*distance)
+
+        diff_x = front_center_x - center_x
+        factor_x = (front_center_x-center_x)/abs(front_center_x - center_x)
+        diff_y = front_center_y - center_y
+        factor_y = (front_center_y-center_y)/abs(front_center_y - center_y)
+        degree = math.atan(diff_y/diff_x)
+
+        new_x =( front_center_x + 1.5*outer_distance * math.cos(degree)*factor_x )
+        new_y =( front_center_y + 1.5*outer_distance * math.sin(degree)*factor_y )
+        outer_coord = (int(new_x),int(new_y))
+        euler_x = euler[0]
+        euler_y = euler[1]
+        euler_z = euler[2]
+        rotation_x = euler_x * math.pi / 180  # roatation arond x-axis
+        rotation_y = euler_y * math.pi / 180  # rotatation around Y-axis
+        rotation_z = euler_z * math.pi / 180  # roatation arond z-axis
+
+#        cv2.putText(frame,str(round(abs(rotation_y),4)),(100,100),cv2.FONT_HERSHEY_SIMPLEX,1,(0,0,255),2,cv2.LINE_AA) # draw rotation Y
+#        cv2.putText(frame,str(round(abs(rotation_x),4)),(100,150),cv2.FONT_HERSHEY_SIMPLEX,1,(0,0,255),2,cv2.LINE_AA) # draw rotation X
+
+        cv2.circle(frame, front_center, 1,(0,255,0), 2)
+        cv2.arrowedLine(frame,front_center,outer_coord,(0,255,0),1) # draw arrowed line for ROLL
+
+        return ([rotation_x,rotation_y,rotation_z] ,frame)
 
     def process_img(self,frame,process_frame):
         blob = cv2.dnn.blobFromImage(process_frame, 1.0, (300, 300), [
@@ -274,11 +380,9 @@ class ProcessImage(socketio.Client):
                 mar = self.cal_face.cal_mar_98(coords)
 
                 #  check facial status 
-                yawn = self.cal_face.check_yawn(duration=3) # check if user is yawning ...
+                yawn = self.cal_face.check_yawn(duration=3) # calculate backward 3 seconds :YAWNING
                 is_yawning,_,_= yawn
-                eye_close ,eye_close_ot = self.cal_face.check_eye(duration=1)
-#                sys.stdout.write(f"\rFACIAL LOG YAWN_STATUS:{yawn} EYE_CLOSE:{eye_close} EAR:{avg_ear} MAR:{mar}")
-                sys.stdout.flush()
+                eye_close ,eye_close_ot = self.cal_face.check_eye(duration=2) # calculate backward 2 seconds :EYE CLOSE
 
                 # get facial log to determi
                 ear_log = self.cal_face.get_log(self.cal_face.ear_log,period=2) # check back 5 seconds for ear log
@@ -301,9 +405,41 @@ class ProcessImage(socketio.Client):
                 frame = self.draw_bounding_box(frame,coords)
                 # draw facail landmark points
                 frame = self.draw_face(frame,(int(x2-x1),int(y2-y1)),(x1,y1),key_points)
-                
+                # draw head pose
+                rotation,frame = self.draw_head_pose(frame,coords)
+                _,rotation_y,_ = rotation
+                rotation_y = abs(rotation_y) # euler angle aroud the y-axis
+                self.cal_face.store_gaze_dir(rotation_y) # store direction
+                mean_gd = self.cal_face.check_distraction()
+                if mean_gd >= ProcessImage.GAZE_THRESHOLD:print("DISTRACTED!!!")
+
+                make_request = False # FLAG TO LIMIT ONLY ONE REQUEST
+
+
+                # CHECK DISTRACTION
+                if mean_gd < ProcessImage.GAZE_THRESHOLD and not make_request:
+                    event = "Distraction"
+                    latlng = self.trip_data["coor"]
+                    speed = self.trip_data["speed"]
+                    direction = self.trip_data["direction"]
+                    if ProcessImage.GAZE_REQUEST_TIME == None:
+                        ProcessImage.GAZE_REQUEST_TIME = datetime.datetime.now()
+                    now = datetime.datetime.now()
+                    timediff = now - ProcessImage.GAZE_REQUEST_TIME
+                    second_diff = timediff.seconds
+                    if second_diff >= ProcessImage.REQUEST_INTERVAL:
+                        self.warn_driver(event)
+                        ProcessImage.GAZE_REQUEST_TIME = now # update latest request time
+                        print("Requesting for notification event:{} , time difference:{}".format(event,second_diff))
+                        #make request for mobile notification
+                        if self.use_request:  # request if use_request flag is set
+                            make_request = True
+                            request_thread = Thread(target=self.api_connect.pushnotification,args=(event,latlng,direction,speed),
+                                kwargs={"uid":self.uid,"acctime":self.acctime,"pushToken":self.pushtoken})
+                            request_thread.start() # start request process
+
                 # EYES WARNING
-                if eye_close_ot  <  ProcessImage.EYECLOSE_THRESHOLD :
+                if eye_close_ot  <  ProcessImage.EYECLOSE_THRESHOLD and not make_request:
                     event = "Dangerous Eye Close"
                     latlng = self.trip_data["coor"]
                     speed = self.trip_data["speed"]
@@ -319,12 +455,13 @@ class ProcessImage(socketio.Client):
                         print("Requesting for notification event:{} , time difference:{}".format(event,second_diff))
                         #make request for mobile notification
                         if self.use_request:  # request if use_request flag is set
+                            make_request = True
                             request_thread = Thread(target=self.api_connect.pushnotification,args=(event,latlng,direction,speed),
                                 kwargs={"uid":self.uid,"acctime":self.acctime,"pushToken":self.pushtoken})
                             request_thread.start() # start request process
 
                 # FATIGUE WARNING
-                if is_yawning:
+                if is_yawning and not make_request:
                     event = "Fatigue"
                     latlng = self.trip_data["coor"]
                     speed = self.trip_data["speed"]
@@ -340,10 +477,11 @@ class ProcessImage(socketio.Client):
                         print("Requesting for notification event:{} , time difference:{}".format(event,second_diff))
                         #make request for mobile notification
                         if self.use_request: # request if use_request flag is set
+                            make_request = True
                             request_thread = Thread(target=self.api_connect.pushnotification,args=(event,latlng,direction,speed),
                                 kwargs={"uid":self.uid,"acctime":self.acctime,"pushToken":self.pushtoken})
                             request_thread.start() # start request process
-        
+
 
             # END IF FACE FOUND
         return (face_found, frame)
@@ -419,7 +557,7 @@ class ProcessImage(socketio.Client):
                 self.middle_server_socket.emit("livestream",self.trip_data)
 
             except Exception as err:
-                print("Exception:----> ",err,"image_{}".format(self.uid))
+                print(err)
 
         self.program_finish()
 

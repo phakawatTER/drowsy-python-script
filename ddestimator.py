@@ -199,8 +199,8 @@ class ddestimator:
 
         label = "({:7.2f}".format(
             euler[0]) + ",{:7.2f}".format(euler[1]) + ",{:7.2f}".format(euler[2]) + ")"
-        cv2.putText(frame, label, tuple(bc_2d_coords[0]),
-                    cv2.FONT_HERSHEY_PLAIN, 0.65, (0, 0, 0), thickness=1, bottomLeftOrigin=False)
+        #cv2.putText(frame, label, tuple(bc_2d_coords[0]),
+         #           cv2.FONT_HERSHEY_PLAIN, 0.65, (0, 0, 0), thickness=1, bottomLeftOrigin=False)
         return frame
 
     def est_gaze_dir(self, points):
